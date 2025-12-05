@@ -18,7 +18,7 @@
       <cl:item std:sid="t-item-8ce66253" label="label1" value="value1"/>
     </cl:combobox>
     <cl:button std:sid="button-ed5c63fb" id="btn2" value="Button">
-      <cl:listener std:sid="listener-d3be25f2" name="click" handler="onBtn2Click"/>
+      <cl:listener std:sid="listener-51976b79" name="click" handler="onBtn2Click2"/>
       <cl:xylayoutdata std:sid="xyl-data-4d2a6efa" top="329px" left="513px" width="169px" height="69px" horizontalAnchor="LEFT" verticalAnchor="TOP"/>
     </cl:button>
     <cl:xylayout std:sid="xylayout-83ef7631"/>

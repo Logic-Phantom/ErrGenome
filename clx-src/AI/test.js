@@ -16,3 +16,12 @@ function onBtn1Click(e){
     var arr = new Array(-1); // 음수 길이 배열
 
 }
+
+/*
+ * "Button" 버튼(btn2)에서 click 이벤트 발생 시 호출.
+ * 사용자가 컨트롤을 클릭할 때 발생하는 이벤트.
+ */
+function onBtn2Click2(e){
+	var btn2 = e.control;
+	app.lookup("cmb1").addItem(new cpr.controls.Item("label1","value1"));
+}
