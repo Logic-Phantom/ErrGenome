@@ -37,7 +37,7 @@
 			 */
 			function onBtn1Click(e){
 
-			   testRangeError();
+			   testNullPointer();
 
 			}
 
