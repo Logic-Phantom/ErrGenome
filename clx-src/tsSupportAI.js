@@ -18,20 +18,34 @@
   // ============================================================
   // 설정
   // ============================================================
-  var CONFIG = {
-    modelName: "Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
-    webllmURL: "../ui/web-llm/web-llm.min.js",
-    errorAnalysisSettings: {
-      temperature: 0.1,
-      max_tokens: 500,
-      top_p: 0.8
-    },
-    chatSettings: {
-      temperature: 0.3,  // 낮춰서 더 일관성 있게
-      max_tokens: 800,
-      top_p: 0.85
-    }
-  };
+	var CONFIG = {
+	  modelName: "Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+	
+	  // 사용 가능한 모델 목록
+	  availableModels: {
+	    "qwen-0.5b": "Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+	    "qwen-1.5b": "Qwen2.5-1.5B-Instruct-q4f32_1-MLC",
+	    "qwen-3b":   "Qwen2.5-3B-Instruct-q4f32_1-MLC",
+	
+	    "phi-3-mini":     "Phi-3-mini-4k-instruct-q4f32_1-MLC",   // 3.8B
+	    "llama-3.2-1b":   "Llama-3.2-1B-Instruct-q4f32_1-MLC",
+	    "llama-3.2-3b":   "Llama-3.2-3B-Instruct-q4f32_1-MLC"
+	  },
+	
+	  webllmURL: "../ui/web-llm/web-llm.min.js",
+	
+	  errorAnalysisSettings: {
+	    temperature: 0.1,
+	    max_tokens: 500,
+	    top_p: 0.8
+	  },
+	
+	  chatSettings: {
+	    temperature: 0.3,
+	    max_tokens: 800,
+	    top_p: 0.85
+	  }
+	};
 
   // ============================================================
   // ES Module 동적 로더
