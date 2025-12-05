@@ -36,8 +36,7 @@
 			 * 사용자가 컨트롤을 클릭할 때 발생하는 이벤트.
 			 */
 			function onBtn1Click(e){
-
-			   testNullPointer();
+			   testJSONParseError();
 
 			}
 
