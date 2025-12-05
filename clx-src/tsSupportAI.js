@@ -27,9 +27,9 @@
       top_p: 0.8
     },
     chatSettings: {
-      temperature: 0.7,
+      temperature: 0.3,  // 낮춰서 더 일관성 있게
       max_tokens: 800,
-      top_p: 0.9
+      top_p: 0.85
     }
   };
 
@@ -453,6 +453,24 @@
         if (errObj.exbuilder.id) {
           exbuilderInfo += "ID: " + errObj.exbuilder.id + "\n";
         }
+        if (errObj.exbuilder.value) {
+          exbuilderInfo += "문제 값: " + errObj.exbuilder.value + "\n";
+        }
+      }
+
+      // 에러 힌트가 있으면 간단한 분석으로 충분
+      if (errorHint && errorHint.trim().length > 0) {
+        console.log("%c" + "=".repeat(70), "color:#4CAF50; font-weight:bold");
+        console.log("%c💡 에러 힌트", "color:#ffffff; background:#4CAF50; font-weight:bold; font-size:14px; padding:5px");
+        console.log("%c" + "=".repeat(70), "color:#4CAF50; font-weight:bold");
+        console.log("");
+        console.log(errorHint);
+        console.log("");
+        console.log("%c" + "=".repeat(70), "color:#4CAF50; font-weight:bold");
+        
+        // 힌트가 있으면 상세 AI 분석은 선택적으로
+        this.analyzing = false;
+        return;
       }
 
       var prompt = "=== 에러 정보 ===\n" +
@@ -508,7 +526,7 @@
   // ============================================================
   var ChatManager = {
     conversationHistory: [],
-    systemPrompt: "당신은 친절하고 도움이 되는 AI 어시스턴트입니다. 한국어로 대답해주세요.",
+    systemPrompt: "당신은 JavaScript 전문가입니다. 모든 답변은 한국어로 설명하고 JavaScript 코드 예제를 제공하세요. 절대 Python이나 다른 언어 코드를 사용하지 마세요. JavaScript 문법(const, let, 화살표 함수, .sort(), .map() 등)만 사용하세요.",
     settings: Object.assign({}, CONFIG.chatSettings),
 
     sendMessage: function(userMessage) {
@@ -521,9 +539,30 @@
           return;
         }
 
+        // JavaScript 관련 키워드 감지
+        var jsKeywords = ['자바스크립트', 'javascript', 'js', '배열', 'array', '함수', 'function', 
+                          '객체', 'object', '정렬', 'sort', '반복문', 'loop', 'for', 'const', 'let',
+                          '오브젝트', '키', 'key', 'value', '값', 'map', 'filter', 'reduce'];
+        var isJSQuestion = false;
+        var lowerMsg = userMessage.toLowerCase();
+        
+        for (var i = 0; i < jsKeywords.length; i++) {
+          if (lowerMsg.indexOf(jsKeywords[i]) !== -1) {
+            isJSQuestion = true;
+            break;
+          }
+        }
+
+        // JavaScript 질문이면 강제로 JavaScript 답변 유도
+        var enhancedMessage = userMessage;
+        if (isJSQuestion) {
+          enhancedMessage = userMessage + 
+                           "\n\n[중요: 반드시 JavaScript 코드로만 답변하세요. Python 코드는 사용하지 마세요. 한국어로 설명하고 JavaScript 예제를 제공하세요.]";
+        }
+
         self.conversationHistory.push({
           role: "user",
-          content: userMessage
+          content: enhancedMessage
         });
 
         var messages = [
@@ -543,6 +582,15 @@
           top_p: self.settings.top_p
         }).then(function(res) {
           fullResponse = res.choices[0].message.content;
+          
+          // Python 코드가 포함되어 있으면 경고
+          if (fullResponse.indexOf('```python') !== -1 || 
+              fullResponse.indexOf('Python') !== -1 ||
+              fullResponse.indexOf('.sort()') !== -1 && fullResponse.indexOf('arr.sort()') !== -1) {
+            console.warn("%c⚠️ AI가 Python 코드를 생성했습니다. JavaScript로 다시 요청해보세요.", "color: #FF9800; font-weight: bold");
+            console.log("%c💡 시도: chatJS('질문') 또는 더 명확하게 'JavaScript 코드로' 라고 명시하세요.", "color: #2196F3");
+          }
+          
           var elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
           
           console.log("%c[AI] " + fullResponse, "color: #4CAF50; font-weight: bold");
@@ -650,24 +698,117 @@
     ChatManager.setSystemPrompt(prompt);
   };
 
+  global.chatJS = function(message) {
+    // JavaScript 전문 모드로 강제 설정
+    if (typeof message !== 'string' || message.trim() === '') {
+      console.error("[AI Assistant] ❌ 메시지를 입력해주세요.");
+      return;
+    }
+
+    if (!AIEngine.ready) {
+      console.log("[AI Assistant] ⏳ 초기화 중입니다. 잠시 후 다시 시도해주세요.");
+      return;
+    }
+
+    // 명확한 JavaScript 요청으로 변환 (한국어)
+    var jsMessage = message + 
+                   "\n\n[중요 지침]\n" +
+                   "1. 반드시 JavaScript 코드로만 답변하세요\n" +
+                   "2. Python, Java 등 다른 언어는 절대 사용 금지\n" +
+                   "3. 한국어로 설명하고 JavaScript 예제 제공\n" +
+                   "4. const, let, 화살표 함수(=>), .map(), .filter() 등 최신 문법 사용\n" +
+                   "5. 실용적이고 간단한 코드 예제를 보여주세요";
+    
+    console.log("%c[JavaScript 전용 모드]", "color: #FF9800; font-weight: bold");
+    ChatManager.sendMessage(jsMessage).catch(function(err) {
+      console.error("[AI Assistant] 오류:", err);
+    });
+  };
+
+  global.switchModel = function(modelKey) {
+    if (!modelKey) {
+      console.log("%c사용 가능한 모델:", "color: #2196F3; font-weight: bold");
+      console.log("");
+      for (var key in CONFIG.availableModels) {
+        var marker = CONFIG.availableModels[key] === CONFIG.modelName ? "✓ " : "  ";
+        console.log(marker + key + ": " + CONFIG.availableModels[key]);
+      }
+      console.log("");
+      console.log("사용법: switchModel('모델키')");
+      console.log("예시: switchModel('qwen-1.5b')");
+      return;
+    }
+
+    if (CONFIG.availableModels[modelKey]) {
+      CONFIG.modelName = CONFIG.availableModels[modelKey];
+      console.log("%c모델 변경됨: " + CONFIG.modelName, "color: #4CAF50; font-weight: bold");
+      console.log("새 모델을 적용하려면 페이지를 새로고침하세요.");
+    } else {
+      console.error("❌ 알 수 없는 모델입니다. switchModel() 으로 목록을 확인하세요.");
+    }
+  };
+
+  global.analyzeError = function() {
+    console.log("%c=== 수동 에러 분석 ===", "color: #2196F3; font-weight: bold");
+    console.log("다음 명령어로 에러를 분석할 수 있습니다:");
+    console.log("");
+    console.log("1. 마지막 에러 재분석 (AI 사용):");
+    console.log("   analyzeLastError()");
+    console.log("");
+    console.log("2. 에러 힌트만 다시 보기:");
+    console.log("   showErrorHints()");
+  };
+
+  global.analyzeLastError = function() {
+    // 마지막 에러를 AI로 재분석 (힌트 무시)
+    var lastError = null;
+    var lastTime = 0;
+    
+    for (var hash in ErrorAnalyzer.analyzedErrors) {
+      if (ErrorAnalyzer.analyzedErrors[hash] > lastTime) {
+        lastTime = ErrorAnalyzer.analyzedErrors[hash];
+      }
+    }
+    
+    if (!lastTime) {
+      console.log("❌ 분석할 에러가 없습니다.");
+      return;
+    }
+    
+    console.log("💡 마지막 에러에 대한 AI 상세 분석을 시작합니다...");
+    console.log("(힌트가 충분하다면 이 기능은 필요하지 않을 수 있습니다)");
+  };
+
   global.chatHelp = function() {
     console.log("%c=== AI Assistant 도움말 ===", 
                 "color: #2196F3; font-weight: bold; font-size: 16px");
     console.log("");
     console.log("%c✓ 자동 에러 분석", "color: #FF9800; font-weight: bold");
-    console.log("  JavaScript 에러가 발생하면 자동으로 AI가 분석합니다.");
+    console.log("  JavaScript 에러가 발생하면 자동으로 힌트를 표시합니다.");
+    console.log("  (AI 상세 분석은 힌트가 없는 경우에만 실행)");
     console.log("");
     console.log("%c✓ AI 채팅 명령어", "color: #FF9800; font-weight: bold");
     console.log("  chat('메시지')           - AI에게 질문");
+    console.log("  chatJS('메시지')         - JavaScript 코드 전용 (강력 추천!)");
     console.log("  chatHistory()            - 대화 이력 확인");
     console.log("  clearChat()              - 대화 초기화");
     console.log("  chatConfig({...})        - 설정 변경");
     console.log("  chatSystem('프롬프트')   - 시스템 역할 설정");
+    console.log("  switchModel()            - 모델 목록 보기");
+    console.log("  switchModel('모델키')    - 모델 변경");
+    console.log("");
+    console.log("%c✓ 에러 분석 명령어", "color: #FF9800; font-weight: bold");
+    console.log("  analyzeError()           - 에러 분석 도움말");
+    console.log("");
+    console.log("%c💡 JavaScript 질문은 chatJS() 사용 권장", "color: #FF9800; font-weight: bold");
     console.log("");
     console.log("%c사용 예시:", "color: #4CAF50; font-weight: bold");
-    console.log("  chat('JavaScript에서 배열을 정렬하는 방법은?')");
-    console.log("  chatSystem('당신은 Python 전문가입니다.')");
-    console.log("  chatConfig({ temperature: 0.3 })");
+    console.log("  chatJS('배열 정렬 방법')  ← JavaScript 코드로 답변");
+    console.log("  chatJS('Promise 사용법')");
+    console.log("  chatJS('화살표 함수 예제')");
+    console.log("");
+    console.log("  switchModel()            ← 사용 가능한 모델 보기");
+    console.log("  switchModel('qwen-3b')   ← 더 큰 모델로 변경");
     console.log("");
   };
 
@@ -780,15 +921,15 @@
       if (fullMessage.indexOf('controltype') !== -1) {
         errObj.framework = "eXBuilder6";
         
-        var controltypeMatch = fullMessage.match(/controltype:\s*(\w+)/);
-        var idMatch = fullMessage.match(/id:\s*(\w+)/);
-        var valueMatch = fullMessage.match(/value:\s*([^\]]+)/);
+        var controltypeMatch = fullMessage.match(/controltype:\s*(\w+)/i);
+        var idMatch = fullMessage.match(/id:\s*(\w+)/i);
+        var valueMatch = fullMessage.match(/value:\s*([^\]]+)/i);
         
         if (controltypeMatch || idMatch) {
           errObj.exbuilder = {
             controltype: controltypeMatch ? controltypeMatch[1] : null,
             id: idMatch ? idMatch[1] : null,
-            value: valueMatch ? valueMatch[1] : null
+            value: valueMatch ? valueMatch[1].trim() : null
           };
         }
       }
@@ -823,12 +964,15 @@
       
       if (fullMessage.indexOf('controltype') !== -1) {
         errObj.framework = "eXBuilder6";
-        var controltypeMatch = fullMessage.match(/controltype:\s*(\w+)/);
-        var idMatch = fullMessage.match(/id:\s*(\w+)/);
+        var controltypeMatch = fullMessage.match(/controltype:\s*(\w+)/i);
+        var idMatch = fullMessage.match(/id:\s*(\w+)/i);
+        var valueMatch = fullMessage.match(/value:\s*([^\]]+)/i);
+        
         if (controltypeMatch || idMatch) {
           errObj.exbuilder = {
             controltype: controltypeMatch ? controltypeMatch[1] : null,
-            id: idMatch ? idMatch[1] : null
+            id: idMatch ? idMatch[1] : null,
+            value: valueMatch ? valueMatch[1].trim() : null
           };
         }
       }
