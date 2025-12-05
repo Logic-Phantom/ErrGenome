@@ -8,6 +8,7 @@
 	var app = new cpr.core.App("AI/test", { 
 		onPrepare: function(loader) {
 			loader.addScript("tsSupportAI.js");
+			loader.addScript("testExam.js");
 		},
 		onCreate: function(/* cpr.core.AppInstance */ app, exports) {
 			var linker = {};
@@ -19,17 +20,7 @@
 			 * @author LCM
 			 ************************************************/
 
-			/*
-			 * "Button" 버튼(btn1)에서 click 이벤트 발생 시 호출.
-			 * 사용자가 컨트롤을 클릭할 때 발생하는 이벤트.
-			 */
-			function onBtn1Click(e){
 
-			    console.log("[테스트] RangeError 발생 시도...");
-			    
-			    var arr = new Array(-1); // 음수 길이 배열
-
-			}
 
 			/*
 			 * "Button" 버튼(btn2)에서 click 이벤트 발생 시 호출.
@@ -38,6 +29,25 @@
 			function onBtn2Click2(e){
 				var btn2 = e.control;
 				app.lookup("cmb1").addItem(new cpr.controls.Item("label1","value1"));
+			}
+
+			/*
+			 * "Button" 버튼(btn1)에서 click 이벤트 발생 시 호출.
+			 * 사용자가 컨트롤을 클릭할 때 발생하는 이벤트.
+			 */
+			function onBtn1Click(e){
+
+			   testTypeError();
+
+			}
+
+			/*
+			 * "시나리오 에러" 버튼(btn3)에서 click 이벤트 발생 시 호출.
+			 * 사용자가 컨트롤을 클릭할 때 발생하는 이벤트.
+			 */
+			function onBtn3Click(e){
+				var btn3 = e.control;
+				runAllScenarioTests();
 			};
 			// End - User Script
 			
@@ -59,13 +69,13 @@
 			
 			// UI Configuration
 			var button_1 = new cpr.controls.Button("btn1");
-			button_1.value = "Button";
+			button_1.value = "기본 에러";
 			if(typeof onBtn1Click == "function") {
 				button_1.addEventListener("click", onBtn1Click);
 			}
 			container.addChild(button_1, {
-				"top": "183px",
-				"left": "624px",
+				"top": "169px",
+				"left": "357px",
 				"width": "120px",
 				"height": "36px"
 			});
@@ -75,8 +85,8 @@
 				comboBox_1.addItem(new cpr.controls.Item("label1", "value1"));
 			})(comboBox_1);
 			container.addChild(comboBox_1, {
-				"top": "307px",
-				"left": "138px",
+				"top": "20px",
+				"left": "66px",
 				"width": "230px",
 				"height": "83px"
 			});
@@ -87,10 +97,22 @@
 				button_2.addEventListener("click", onBtn2Click2);
 			}
 			container.addChild(button_2, {
-				"top": "329px",
-				"left": "513px",
+				"top": "20px",
+				"left": "349px",
 				"width": "169px",
 				"height": "69px"
+			});
+			
+			var button_3 = new cpr.controls.Button("btn3");
+			button_3.value = "시나리오 에러";
+			if(typeof onBtn3Click == "function") {
+				button_3.addEventListener("click", onBtn3Click);
+			}
+			container.addChild(button_3, {
+				"top": "251px",
+				"left": "357px",
+				"width": "120px",
+				"height": "36px"
 			});
 		}
 	});
