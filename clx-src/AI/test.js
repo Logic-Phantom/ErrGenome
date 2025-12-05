@@ -22,7 +22,7 @@ function onBtn2Click2(e){
  */
 function onBtn1Click(e){
 
-   testTypeError();
+   testRangeError();
 
 }
 
