@@ -219,68 +219,49 @@
         errorInfo += "\n전체 스택:\n" + stackLines.slice(0, 3).join('\n') + "\n";
       }
 
-      // 에러 타입별 힌트 추가 (eXBuilder6 포함)
-      var errorHint = "";
+      // eXBuilder6 프레임워크 감지
       var isExBuilder = errObj.framework === "eXBuilder6" || 
                         (errObj.message && errObj.message.indexOf('controltype') !== -1);
       
-      if (isExBuilder) {
-        errorHint = "\n[프레임워크] eXBuilder6 UI 프레임워크 에러입니다.\n";
-        
-        if (errObj.exbuilder) {
-          errorHint += "[컨트롤 정보]\n";
-          if (errObj.exbuilder.controltype) {
-            errorHint += "- 타입: " + errObj.exbuilder.controltype + "\n";
-          }
-          if (errObj.exbuilder.id) {
-            errorHint += "- ID: " + errObj.exbuilder.id + "\n";
-          }
-          if (errObj.exbuilder.value) {
-            errorHint += "- 값: " + errObj.exbuilder.value + "\n";
-          }
+      // eXBuilder6 컨트롤 정보 추가
+      var exbuilderInfo = "";
+      if (isExBuilder && errObj.exbuilder) {
+        exbuilderInfo = "\n[eXBuilder6 컨트롤 정보]\n";
+        if (errObj.exbuilder.controltype) {
+          exbuilderInfo += "컨트롤 타입: " + errObj.exbuilder.controltype + "\n";
         }
-        
-        // eXBuilder6 에러 패턴별 힌트
-        if (errObj.message.indexOf('duplicated') !== -1) {
-          errorHint += "\n[eXBuilder6 힌트] 중복된 값(duplicated)은 주로:\n" +
-                      "- ComboBox에 같은 value를 가진 item을 여러 번 추가\n" +
-                      "- ListBox나 Grid에 동일한 key 값 중복\n" +
-                      "- Dataset에 중복된 컬럼명\n";
+        if (errObj.exbuilder.id) {
+          exbuilderInfo += "컨트롤 ID: " + errObj.exbuilder.id + "\n";
         }
-      } else if (errObj.message) {
-        var msg = errObj.message.toLowerCase();
-        if (msg.indexOf('rangeerror') !== -1 || msg.indexOf('invalid array length') !== -1) {
-          errorHint = "\n[힌트] RangeError는 주로 다음 경우에 발생합니다:\n" +
-                     "- new Array(음수) 또는 너무 큰 수\n" +
-                     "- Array.from()에 잘못된 길이\n" +
-                     "- 재귀 호출 깊이 초과\n";
-        } else if (msg.indexOf('typeerror') !== -1) {
-          errorHint = "\n[힌트] TypeError는 타입이 예상과 다를 때 발생합니다.\n";
-        } else if (msg.indexOf('referenceerror') !== -1) {
-          errorHint = "\n[힌트] ReferenceError는 변수를 찾을 수 없을 때 발생합니다.\n";
+        if (errObj.exbuilder.value) {
+          exbuilderInfo += "문제된 값: " + errObj.exbuilder.value + "\n";
         }
       }
 
-      var prompt = "당신은 JavaScript와 eXBuilder6 UI 프레임워크 전문가입니다. 아래 에러를 분석하고 한국어로 명확하게 설명해주세요.\n\n" +
+      var prompt = "당신은 JavaScript와 eXBuilder6(Cleopatra) UI 프레임워크 전문가입니다.\n\n" +
                    "=== 에러 정보 ===\n" +
                    errorInfo + 
-                   errorHint + "\n" +
+                   exbuilderInfo + "\n" +
+                   (isExBuilder ? 
+                   "※ 이것은 eXBuilder6 UI 프레임워크 에러입니다. ComboBox, ListBox, Grid, Dataset 등의 컴포넌트와 관련이 있을 수 있습니다.\n\n" : 
+                   "※ 이것은 표준 JavaScript 에러입니다.\n\n") +
                    "=== 분석 요청 ===\n" +
-                   "다음 형식으로 한국어로 답변해주세요:\n\n" +
-                   "1. 에러 원인:\n" +
-                   "   이 에러가 무엇인지 간단명료하게 설명" +
-                   (isExBuilder ? " (eXBuilder6 관점에서)" : "") + "\n\n" +
+                   "에러 메시지와 스택을 보고 다음을 한국어로 답변해주세요:\n\n" +
+                   "1. 에러 원인: (한 문장으로 핵심만)\n\n" +
                    "2. 왜 발생했나:\n" +
-                   "   코드에서 어떤 상황일 때 이런 에러가 나는지 구체적으로 설명\n\n" +
+                   "   - 에러 메시지의 키워드(예: duplicated, invalid, range 등)를 보고 추론\n" +
+                   "   - 어떤 코드 패턴에서 이런 에러가 나는지 설명\n" +
+                   (isExBuilder ? "   - eXBuilder6 컴포넌트 사용 시 흔한 실수 고려\n" : "") + "\n" +
                    "3. 해결 방법:\n" +
-                   "   실제로 고칠 수 있는 방법을 코드 예시와 함께 제시\n" +
                    "   ```javascript\n" +
-                   "   // 잘못된 예\n" +
-                   "   // 올바른 예\n" +
+                   "   // 문제가 되는 코드 예시\n" +
+                   "   \n" +
+                   "   // 올바른 코드 예시\n" +
                    "   ```\n\n" +
-                   "4. 개발자 조치:\n" +
-                   "   개발자가 즉시 확인해야 할 사항\n\n" +
-                   "주의: 반드시 JavaScript" + (isExBuilder ? "/eXBuilder6" : "") + " 관점에서 분석하고, 파이썬이나 다른 언어를 언급하지 마세요.";
+                   "4. 개발자 체크리스트:\n" +
+                   "   - [ ] 확인할 사항 1\n" +
+                   "   - [ ] 확인할 사항 2\n\n" +
+                   "중요: 반드시 JavaScript" + (isExBuilder ? "/eXBuilder6" : "") + " 관점에서 분석하세요. 다른 언어는 언급하지 마세요.";
 
       var self = this;
       this.engine.chat.completions
@@ -288,7 +269,16 @@
           messages: [
             { 
               role: "system", 
-              content: "당신은 10년 경력의 JavaScript 전문 개발자입니다. 에러를 분석하고 실용적인 해결책을 제시합니다. 항상 한국어로만 답변하며, 파이썬이나 다른 언어는 절대 언급하지 않습니다. 간결하고 명확하게 답변합니다." 
+              content: "당신은 10년 경력의 JavaScript 개발자이자 eXBuilder6(Cleopatra) UI 프레임워크 전문가입니다.\n\n" +
+                       "역할:\n" +
+                       "- 에러 메시지의 키워드(duplicated, invalid, range, type, reference 등)를 보고 원인 추론\n" +
+                       "- eXBuilder6 컴포넌트(ComboBox, ListBox, Grid, Dataset)의 일반적인 사용 실수 파악\n" +
+                       "- 실용적이고 구체적인 해결책 제시\n\n" +
+                       "규칙:\n" +
+                       "- 항상 한국어로만 답변\n" +
+                       "- 파이썬, Java 등 다른 언어 절대 언급 금지\n" +
+                       "- 간결하고 명확하게 (불필요한 설명 제거)\n" +
+                       "- 코드 예시는 반드시 JavaScript 또는 eXBuilder6 API 사용"
             },
             { 
               role: "user", 
