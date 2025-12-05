@@ -76,9 +76,9 @@
       console.log("[AI Error Assistant] WebLLM 로드 시작...");
 
       // WebLLM이 이미 전역으로 로드되어 있는지 확인
-      if (global.webllm && global.webllm.CreateMLCEngine) {
+      if (window.webllm && window.webllm.CreateMLCEngine) {
         console.log("[AI Error Assistant] WebLLM이 이미 로드되어 있습니다.");
-        this.initializeEngine(global.webllm.CreateMLCEngine);
+        this.initializeEngine(window.webllm.CreateMLCEngine);
         return;
       }
 
@@ -117,7 +117,7 @@
         console.log("[AI Error Assistant] CreateMLCEngine 함수 찾음:", typeof CreateMLCEngine);
 
         // 전역 객체로도 저장 (다른 스크립트에서 사용 가능)
-        global.webllm = webllmModule;
+        window.webllm = webllmModule;
         
         // 엔진 초기화
         AISupport.initializeEngine(CreateMLCEngine);
@@ -132,7 +132,7 @@
       // 더 작은 모델 사용 (빠른 로딩과 낮은 리소스 사용)
       // 지원 모델 목록: https://mlc.ai/models
       var modelName = "Qwen2.5-0.5B-Instruct-q4f32_1-MLC";  // 매우 작은 모델 (약 0.5B 파라미터)
-      // 대안: "Phi-3-mini-4k-instruct-q4f32_1-MLC", "TinyLlama-1.1B-Chat-v1.0-q4f32_1-MLC"
+      // 대안: "Phi-3-mini-4k-instruct-q4f32_1-MLC", "TinyLlama-1.1B-Chat-v1.0-q4f32_1-MLC" ,"Qwen2.5-0.5B-Instruct-q4f32_1-MLC";  // 매우 작은 모델 (약 0.5B 파라미터)
       
       console.log("[AI Error Assistant] 모델 로드 시작: " + modelName);
       console.log("[AI Error Assistant] 첫 로드 시 다운로드가 필요할 수 있습니다 (시간이 걸릴 수 있음)");
@@ -219,20 +219,39 @@
      * @param {Object} errObj - 에러 객체
      */
     handleError: function (errObj) {
-      if (!this.ready) {
-        console.warn("[AI Error Assistant] 엔진 준비 중. 에러를 큐에 추가합니다.");
+      // 먼저 기본 에러 정보는 항상 출력
+      console.log("%c" + "=".repeat(70), "color:#ff6600; font-weight:bold; font-size:14px");
+      console.log("%c" + " ".repeat(25) + "⚠️ 에러 발생" + " ".repeat(25), "color:#ffffff; background:#ff6600; font-weight:bold; font-size:16px; padding:10px");
+      console.log("%c" + "=".repeat(70), "color:#ff6600; font-weight:bold; font-size:14px");
+      console.log("[AI Error Assistant] 에러 타입:", errObj.name || "Unknown");
+      console.log("[AI Error Assistant] 에러 메시지:", errObj.message || "N/A");
+      
+      if (errObj.source) {
+        console.log("[AI Error Assistant] 파일:", errObj.source);
+      }
+      if (errObj.lineno) {
+        console.log("[AI Error Assistant] 줄 번호:", errObj.lineno);
+      }
+      if (errObj.stack) {
+        console.log("[AI Error Assistant] 스택 트레이스:", errObj.stack);
+      }
+      console.log("%c" + "=".repeat(70), "color:#ff6600; font-weight:bold; font-size:14px");
+      
+      // 엔진이 준비되지 않았으면 큐에 추가하고 기본 정보만 출력
+      if (!this.ready || !this.engine) {
+        console.log("[AI Error Assistant] 엔진 준비 중. 에러를 큐에 추가합니다.");
         this.errorQueue.push(errObj);
         
         // 큐가 너무 많이 쌓이면 경고
         if (this.errorQueue.length > 10) {
           console.warn("[AI Error Assistant] 에러 큐가 10개를 초과했습니다. 일부 에러가 누락될 수 있습니다.");
         }
+        console.log("[AI Error Assistant] 엔진 로드 완료 후 자동으로 분석됩니다.");
         return;
       }
 
-      console.log("%c[AI Error Assistant] 🔍 에러 분석 시작...", "color:#2196F3; font-weight:bold");
-      console.log("[AI Error Assistant] 에러 타입:", errObj.name || "Unknown");
-      console.log("[AI Error Assistant] 에러 메시지:", errObj.message || "N/A");
+      // AI 분석 시작
+      console.log("%c[AI Error Assistant] 🔍 AI 에러 분석 시작...", "color:#2196F3; font-weight:bold");
       console.log("[AI Error Assistant] AI가 분석 중입니다. (몇 초 소요될 수 있음)");
       
       var prompt =
@@ -248,6 +267,7 @@
         "4) 고객 안내 멘트\n" +
         "\n한국어로 답변해주세요.";
 
+      var self = this;
       this.engine.chat.completions
         .create({
           messages: [{ role: "user", content: prompt }]
@@ -268,6 +288,7 @@
         })
         .catch(function (err) {
           console.error("[AI Error Assistant] LLM 분석 오류:", err);
+          console.log("[AI Error Assistant] 기본 에러 정보는 위에 표시되었습니다.");
         });
     },
 
@@ -300,50 +321,337 @@
   };
 
   // 글로벌 객체에 노출
-  global.AISupport = AISupport;
+  window.AISupport = AISupport;
 
   // ============================================================
-  // 3. 글로벌 에러 후킹
+  // 3. 글로벌 에러 후킹 (내부 엔진이 덮어쓰는 것을 방지)
   // ============================================================
   
   // 기존 에러 핸들러 저장
   var originalOnError = window.onerror;
   var originalOnUnhandledRejection = window.onunhandledrejection;
+  var aiErrorHandlerInstalled = false;
+  var aiErrorHandlerId = 'AISupport_ErrorHandler_' + Date.now();
+  
+  // console.error 후킹 (cleopatra 내부 에러 캡처용)
+  var originalConsoleError = console.error;
+  var originalConsoleWarn = console.warn;
 
   /**
-   * window.onerror 후킹
+   * AI Error Handler 함수
    */
-  window.onerror = function (msg, src, line, col, error) {
-    console.log("[AI Error Assistant] window.onerror 호출됨:", msg, src, line, col);
+  function aiErrorHandler(msg, src, line, col, error) {
+    console.log("%c[AI Error Assistant] window.onerror 호출됨!", "color:#ff0000; font-weight:bold");
+    console.log("[AI Error Assistant] 메시지:", msg);
+    console.log("[AI Error Assistant] 소스:", src);
+    console.log("[AI Error Assistant] 줄:", line, "컬럼:", col);
+    console.log("[AI Error Assistant] 에러 객체:", error);
     
-    // 기존 핸들러가 있으면 먼저 실행
-    if (originalOnError) {
-      originalOnError.call(this, msg, src, line, col, error);
+    // 기존 핸들러가 있으면 먼저 실행 (단, 우리 자신이 아닌 경우만)
+    if (originalOnError && typeof originalOnError === 'function' && originalOnError !== aiErrorHandler) {
+      try {
+        originalOnError.call(this, msg, src, line, col, error);
+      } catch (e) {
+        console.error("[AI Error Assistant] 기존 에러 핸들러 실행 중 오류:", e);
+      }
     }
 
     // AI 분석 요청
     var errObj = {
       name: error && error.name ? error.name : "Error",
       message: msg || (error && error.message ? error.message : "Unknown error"),
-      source: src,
-      lineno: line,
-      colno: col,
+      source: src || "",
+      lineno: line || 0,
+      colno: col || 0,
       stack: error && error.stack ? error.stack : undefined,
       timestamp: new Date().toISOString()
     };
     
-    console.log("[AI Error Assistant] 에러 객체 생성:", errObj);
-    AISupport.handleError(errObj);
+    console.log("[AI Error Assistant] 에러 객체 생성 완료:", errObj);
+    
+    // AISupport가 초기화되었는지 확인
+    if (window.AISupport) {
+      AISupport.handleError(errObj);
+    } else {
+      console.error("[AI Error Assistant] AISupport가 아직 초기화되지 않았습니다!");
+      console.log("[AI Error Assistant] 기본 에러 정보:", errObj);
+    }
     
     // false를 반환하면 기본 에러 핸들링도 계속됨
     return false;
+  }
+
+  /**
+   * window.onerror 강제 재등록 (내부 엔진이 덮어쓴 경우 대비)
+   */
+  function installErrorHandler() {
+    // 현재 window.onerror가 우리 핸들러인지 확인
+    if (window.onerror === aiErrorHandler) {
+      return; // 이미 설치됨
+    }
+    
+    // 기존 핸들러를 저장 (우리 핸들러가 아닌 경우만)
+    if (window.onerror && window.onerror !== aiErrorHandler) {
+      originalOnError = window.onerror;
+      console.log("[AI Error Assistant] 기존 에러 핸들러 저장:", typeof originalOnError);
+    }
+    
+    // 우리 핸들러로 교체
+    try {
+      window.onerror = aiErrorHandler;
+      aiErrorHandlerInstalled = true;
+      console.log("%c[AI Error Assistant] ✓ window.onerror 핸들러 설치 완료", "color:#4CAF50; font-weight:bold");
+    } catch (e) {
+      console.error("[AI Error Assistant] window.onerror 설치 실패:", e);
+    }
+  }
+
+  // 즉시 설치
+  installErrorHandler();
+  
+  // ============================================================
+  // 3-1. console.error/warn 후킹 (cleopatra 내부 에러 캡처)
+  // ============================================================
+  // cleopatra가 try-catch로 에러를 잡아서 console.error로 출력하는 경우를 캡처
+  
+  console.error = function() {
+    var args = Array.prototype.slice.call(arguments);
+    
+    // 원래 console.error 실행
+    originalConsoleError.apply(console, args);
+    
+    // 에러 메시지 추출
+    var errorMessage = '';
+    var errorObj = null;
+    
+    for (var i = 0; i < args.length; i++) {
+      if (args[i] instanceof Error) {
+        errorObj = args[i];
+        errorMessage = args[i].message || String(args[i]);
+        break;
+      } else if (typeof args[i] === 'string' && args[i].length > 0) {
+        errorMessage = args[i];
+      }
+    }
+    
+    // 에러 패턴 감지 (cleopatra 에러인지 확인)
+    if (errorMessage && (
+        errorMessage.indexOf('Error') !== -1 ||
+        errorMessage.indexOf('TypeError') !== -1 ||
+        errorMessage.indexOf('ReferenceError') !== -1 ||
+        errorMessage.indexOf('RangeError') !== -1 ||
+        errorMessage.indexOf('SyntaxError') !== -1 ||
+        errorObj !== null
+    )) {
+      console.log("%c[AI Error Assistant] console.error에서 에러 감지!", "color:#ff6600; font-weight:bold");
+      
+      var errObj = {
+        name: errorObj ? errorObj.name : "Error",
+        message: errorMessage || "Unknown error",
+        stack: errorObj ? errorObj.stack : (new Error().stack),
+        source: "console.error",
+        type: "console_error",
+        timestamp: new Date().toISOString(),
+        originalArgs: args
+      };
+      
+      // 스택에서 cleopatra 관련 정보 추출
+      if (errObj.stack) {
+        var stackLines = errObj.stack.split('\n');
+        for (var j = 0; j < stackLines.length; j++) {
+          if (stackLines[j].indexOf('cleopatra') !== -1 || 
+              stackLines[j].indexOf('.clx.js') !== -1 ||
+              stackLines[j].indexOf('test.clx') !== -1) {
+            errObj.source = stackLines[j].trim();
+            break;
+          }
+        }
+      }
+      
+      // AI 분석 요청
+      if (window.AISupport) {
+        setTimeout(function() {
+          AISupport.handleError(errObj);
+        }, 100); // 약간의 지연으로 원래 에러 출력 후 분석
+      }
+    }
   };
+  
+  console.warn = function() {
+    var args = Array.prototype.slice.call(arguments);
+    
+    // 원래 console.warn 실행
+    originalConsoleWarn.apply(console, args);
+    
+    // 경고 메시지도 에러로 간주할 수 있는 경우 캡처
+    var message = '';
+    for (var i = 0; i < args.length; i++) {
+      if (typeof args[i] === 'string' && args[i].length > 0) {
+        message = args[i];
+        break;
+      }
+    }
+    
+    // 에러 관련 경고인지 확인
+    if (message && (
+        message.indexOf('Error') !== -1 ||
+        message.indexOf('Exception') !== -1 ||
+        message.indexOf('Failed') !== -1
+    )) {
+      console.log("%c[AI Error Assistant] console.warn에서 에러 관련 경고 감지!", "color:#ffaa00; font-weight:bold");
+      
+      var errObj = {
+        name: "Warning",
+        message: message,
+        stack: new Error().stack,
+        source: "console.warn",
+        type: "console_warn",
+        timestamp: new Date().toISOString()
+      };
+      
+      // AI 분석 요청 (경고는 선택적으로)
+      if (window.AISupport) {
+        setTimeout(function() {
+          // 경고는 큐에만 추가 (엔진 준비되면 분석)
+          if (!AISupport.ready) {
+            AISupport.errorQueue.push(errObj);
+          } else {
+            AISupport.handleError(errObj);
+          }
+        }, 100);
+      }
+    }
+  };
+  
+  console.log("%c[AI Error Assistant] ✓ console.error/warn 후킹 완료", "color:#4CAF50; font-weight:bold");
+
+  // Object.defineProperty로 덮어쓰기 방지 시도
+  try {
+    var currentOnError = window.onerror;
+    Object.defineProperty(window, 'onerror', {
+      get: function() {
+        return aiErrorHandler;
+      },
+      set: function(value) {
+        // 다른 핸들러가 설정하려고 하면 우리 핸들러를 유지하고 기존 핸들러로 저장
+        if (value !== aiErrorHandler && typeof value === 'function') {
+          originalOnError = value;
+          console.log("[AI Error Assistant] 다른 에러 핸들러가 설정되었지만, 우리 핸들러를 유지합니다.");
+        }
+        // 실제로는 설정하지 않고 우리 핸들러를 유지
+      },
+      configurable: true
+    });
+    console.log("[AI Error Assistant] ✓ window.onerror 보호 활성화 (defineProperty)");
+  } catch (e) {
+    console.warn("[AI Error Assistant] window.onerror 보호 실패 (defineProperty 사용 불가):", e);
+    // defineProperty가 실패하면 주기적으로 체크하는 방식 사용
+  }
+
+  // 주기적으로 window.onerror가 우리 핸들러인지 확인하고 재설치
+  var checkInterval = setInterval(function() {
+    if (window.onerror !== aiErrorHandler) {
+      console.warn("[AI Error Assistant] ⚠️ window.onerror가 덮어써졌습니다! 재설치 중...");
+      installErrorHandler();
+    }
+    
+    // cleopatra 객체가 로드되었는지 확인하고 에러 핸들러 후킹 시도
+    if (window.cpr && window.cpr.core && !window._aiCleopatraHooked) {
+      try {
+        hookCleopatraErrorHandlers();
+        window._aiCleopatraHooked = true;
+      } catch (e) {
+        // 무시
+      }
+    }
+  }, 500); // 0.5초마다 체크
+
+  // 페이지 언로드 시 인터벌 정리
+  window.addEventListener('beforeunload', function() {
+    if (checkInterval) {
+      clearInterval(checkInterval);
+    }
+  });
+  
+  /**
+   * Cleopatra 에러 핸들러 후킹
+   */
+  function hookCleopatraErrorHandlers() {
+    if (!window.cpr || !window.cpr.core) {
+      return;
+    }
+    
+    console.log("[AI Error Assistant] Cleopatra 객체 감지. 에러 핸들러 후킹 시도...");
+    
+    // cleopatra의 이벤트 시스템 후킹 시도
+    try {
+      // cpr.events.EventBus 후킹
+      if (window.cpr && window.cpr.events && window.cpr.events.EventBus) {
+        var originalDispatch = window.cpr.events.EventBus.prototype.dispatchEvent;
+        if (originalDispatch && typeof originalDispatch === 'function') {
+          window.cpr.events.EventBus.prototype.dispatchEvent = function(event) {
+            try {
+              return originalDispatch.call(this, event);
+            } catch (err) {
+              console.log("%c[AI Error Assistant] Cleopatra 이벤트 디스패치 중 에러!", "color:#ff0000; font-weight:bold");
+              if (window.AISupport) {
+                AISupport.handleError({
+                  name: err.name || "Error",
+                  message: err.message || String(err),
+                  stack: err.stack,
+                  source: "cleopatra.EventBus.dispatchEvent",
+                  type: "cleopatra_internal",
+                  timestamp: new Date().toISOString()
+                });
+              }
+              throw err; // 원래 에러 다시 던지기
+            }
+          };
+          console.log("[AI Error Assistant] ✓ Cleopatra EventBus 후킹 완료");
+        }
+      }
+    } catch (e) {
+      console.warn("[AI Error Assistant] Cleopatra 후킹 실패:", e);
+    }
+    
+    // cleopatra의 tryCatch 함수 후킹 시도
+    try {
+      if (window.cpr && window.cpr.utils) {
+        var originalTryCatch = window.cpr.utils.tryCatch;
+        if (originalTryCatch && typeof originalTryCatch === 'function') {
+          window.cpr.utils.tryCatch = function(fn, context) {
+            try {
+              return originalTryCatch.call(this, fn, context);
+            } catch (err) {
+              console.log("%c[AI Error Assistant] Cleopatra tryCatch에서 에러!", "color:#ff0000; font-weight:bold");
+              if (window.AISupport) {
+                AISupport.handleError({
+                  name: err.name || "Error",
+                  message: err.message || String(err),
+                  stack: err.stack,
+                  source: "cleopatra.utils.tryCatch",
+                  type: "cleopatra_internal",
+                  timestamp: new Date().toISOString()
+                });
+              }
+              throw err;
+            }
+          };
+          console.log("[AI Error Assistant] ✓ Cleopatra tryCatch 후킹 완료");
+        }
+      }
+    } catch (e) {
+      console.warn("[AI Error Assistant] Cleopatra tryCatch 후킹 실패:", e);
+    }
+  }
 
   /**
    * Promise rejection 후킹
    */
   if (window.addEventListener) {
     window.addEventListener("unhandledrejection", function (event) {
+      console.log("%c[AI Error Assistant] Promise rejection 캡처됨!", "color:#ff0000; font-weight:bold");
+      
       var error = event.reason;
       var errObj;
 
@@ -363,7 +671,15 @@
         };
       }
 
-      AISupport.handleError(errObj);
+      console.log("[AI Error Assistant] Promise rejection 에러 객체:", errObj);
+      
+      // AISupport가 초기화되었는지 확인
+      if (window.AISupport) {
+        AISupport.handleError(errObj);
+      } else {
+        console.error("[AI Error Assistant] AISupport가 아직 초기화되지 않았습니다!");
+        console.log("[AI Error Assistant] 기본 에러 정보:", errObj);
+      }
     });
   }
 
@@ -371,15 +687,41 @@
   // 4. 자동 초기화
   // ============================================================
   
+  console.log("[AI Error Assistant] 스크립트 로드 완료");
+  console.log("[AI Error Assistant] AISupport 객체 생성됨:", typeof AISupport);
+  console.log("[AI Error Assistant] 에러 핸들러 설치 상태:", aiErrorHandlerInstalled);
+  
   // DOM 로드 완료 후 초기화
   if (document.readyState === "loading") {
+    console.log("[AI Error Assistant] DOM 로딩 중. DOMContentLoaded 이벤트 대기...");
     document.addEventListener("DOMContentLoaded", function () {
+      console.log("[AI Error Assistant] DOMContentLoaded 이벤트 발생. 초기화 시작...");
+      // 에러 핸들러 재확인
+      installErrorHandler();
       AISupport.init();
     });
   } else {
     // 이미 로드되어 있으면 즉시 초기화
+    console.log("[AI Error Assistant] DOM 이미 로드됨. 즉시 초기화 시작...");
+    installErrorHandler();
     AISupport.init();
   }
+  
+  // 스크립트 로드 후 에러 핸들러 재확인 (내부 엔진이 로드된 후)
+  setTimeout(function() {
+    console.log("[AI Error Assistant] 스크립트 로드 후 에러 핸들러 재확인...");
+    installErrorHandler();
+    if (!AISupport.initialized) {
+      console.log("[AI Error Assistant] 타임아웃 후 초기화 재시도...");
+      AISupport.init();
+    }
+  }, 1000); // 1초 후 재확인 (내부 엔진 로드 대기)
+  
+  // 추가 재확인 (더 늦게 로드되는 경우 대비)
+  setTimeout(function() {
+    console.log("[AI Error Assistant] 추가 에러 핸들러 재확인...");
+    installErrorHandler();
+  }, 3000); // 3초 후 재확인
 
 })(window);
 

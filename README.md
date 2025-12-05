@@ -545,3 +545,5 @@ var modelName = "Qwen2.5-0.5B-Instruct-q4f32_1-MLC";  // 사용할 모델
 **프로젝트 이름:** ErrGenome  
 **저장소:** https://github.com/Logic-Phantom/ErrGenome.git
 
+
+
