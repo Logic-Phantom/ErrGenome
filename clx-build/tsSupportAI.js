@@ -19,8 +19,8 @@
   // 1. WebLLM Loader (ES Module 방식)
   // ============================================================
   // 절대 경로 또는 상대 경로 설정 (프로젝트 구조에 맞게 수정)
-  var WebLLM_URL = "../web-llm/web-llm.min.js";  // 또는 "../web-llm/web-llm.min.js"
-  var WebLLM_WORKER_URL = "../web-llm/worker.js";  // 또는 "../web-llm/worker.js"
+  var WebLLM_URL = "../ui/web-llm/web-llm.min.js";  // 또는 "../web-llm/web-llm.min.js"
+  var WebLLM_WORKER_URL = "../ui/web-llm/worker.js";  // 또는 "../web-llm/worker.js"
 
   /**
    * ES Module 동적 로드 함수
