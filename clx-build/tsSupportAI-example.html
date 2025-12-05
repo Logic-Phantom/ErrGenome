@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>실제 프로젝트 통합 예시</title>
+</head>
+<body>
+    <h1>실제 프로젝트 통합 예시</h1>
+    
+    <p>이 페이지는 실제 프로젝트에 AI Error Assistant를 통합하는 방법을 보여줍니다.</p>
+    
+    <!-- 실제 애플리케이션 코드들... -->
+    <script src="your-app-code.js"></script>
+    <script src="your-other-libs.js"></script>
+    
+    <!-- 
+        AI Error Assistant는 다른 스크립트들 다음에 로드하는 것을 권장합니다.
+        이렇게 하면 모든 에러를 캡처할 수 있습니다.
+    -->
+    <script src="tsSupportAI.js"></script>
+    
+    <!-- 
+        또는 HTML 하단에 배치하는 것도 좋습니다.
+        <script src="/clx-src/tsSupportAI.js"></script>
+    -->
+    
+    <script>
+        // 실제 애플리케이션 코드 예시
+        
+        // 예시 1: API 호출 중 에러 발생
+        function fetchUserData(userId) {
+            fetch('/api/users/' + userId)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('HTTP ' + response.status);
+                    }
+                    return response.json();
+                })
+                .then(function(data) {
+                    console.log('사용자 데이터:', data);
+                })
+                .catch(function(error) {
+                    // 에러는 자동으로 캡처되지만, 수동으로도 분석 가능
+                    console.error('사용자 데이터 로드 실패:', error);
+                    // AISupport.analyze(error); // 필요시 수동 분석
+                });
+        }
+        
+        // 예시 2: 복잡한 비즈니스 로직에서 발생하는 에러
+        function processOrder(orderData) {
+            try {
+                // 복잡한 로직...
+                var total = 0;
+                orderData.items.forEach(function(item) {
+                    total += item.price * item.quantity;
+                });
+                
+                if (total < 0) {
+                    throw new Error('주문 금액이 음수일 수 없습니다.');
+                }
+                
+                return total;
+            } catch (error) {
+                // 에러가 자동으로 분석됨
+                throw error;
+            }
+        }
+        
+        // 예시 3: 제어할 수 없는 외부 라이브러리 에러
+        // 이런 에러들도 자동으로 캡처되어 분석됨
+        function initializeThirdPartyLibrary() {
+            // 외부 라이브러리가 에러를 발생시키는 경우
+            // window.onerror가 자동으로 캡처함
+        }
+        
+        // 페이지 로드 후 테스트
+        window.addEventListener('DOMContentLoaded', function() {
+            console.log('애플리케이션 초기화 완료');
+            
+            // 테스트: 의도적으로 에러 발생 (실제 환경에서는 제거)
+            // fetchUserData(null);
+        });
+    </script>
+</body>
+</html>
+

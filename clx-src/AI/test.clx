@@ -1,0 +1,30 @@
+<?xml version="1.1" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:cl="http://tomatosystem.co.kr/cleopatra" xmlns:std="http://tomatosystem.co.kr/cleopatra/studio" std:sid="html-46798302" version="1.0.5927">
+  <head std:sid="head-e7e66b57">
+    <screen std:sid="screen-e9dfbdc2" id="default" name="default" width="1024px" height="768px"/>
+    <screen std:sid="screen-c5330c61" id="tablet" name="tablet" width="500px" height="667px"/>
+    <screen std:sid="screen-66204f02" id="mobile" name="mobile" width="350px" height="525px"/>
+    <script std:sid="script-55f7db8d" src="../tsSupportAI.js" type="text/javascript"/>
+    <cl:model std:sid="model-7879b76a"/>
+    <cl:appspec/>
+  </head>
+  <body std:sid="body-7439a1c8">
+    <cl:button std:sid="button-9c69e9d8" id="btn1" value="Button">
+      <cl:listener std:sid="listener-5932289e" name="click" handler="onBtn1Click"/>
+      <cl:xylayoutdata std:sid="xyl-data-9652bce6" top="183px" left="624px" width="120px" height="36px" horizontalAnchor="LEFT" verticalAnchor="TOP"/>
+    </cl:button>
+    <cl:combobox std:sid="c-box-4c7f996c" id="cmb1">
+      <cl:xylayoutdata std:sid="xyl-data-1beb4574" top="307px" left="138px" width="230px" height="83px" horizontalAnchor="LEFT" verticalAnchor="TOP"/>
+      <cl:item std:sid="t-item-8ce66253" label="label1" value="value1"/>
+    </cl:combobox>
+    <cl:button std:sid="button-ed5c63fb" id="btn2" value="Button">
+      <cl:listener std:sid="listener-d3be25f2" name="click" handler="onBtn2Click"/>
+      <cl:xylayoutdata std:sid="xyl-data-4d2a6efa" top="329px" left="513px" width="169px" height="69px" horizontalAnchor="LEFT" verticalAnchor="TOP"/>
+    </cl:button>
+    <cl:xylayout std:sid="xylayout-83ef7631"/>
+  </body>
+  <std:studiosetting>
+    <std:hruler/>
+    <std:vruler/>
+  </std:studiosetting>
+</html>
