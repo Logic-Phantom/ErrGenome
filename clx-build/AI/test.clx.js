@@ -26,30 +26,9 @@
 			function onBtn1Click(e){
 
 			    console.log("[테스트] RangeError 발생 시도...");
-			     var arr = new Array(-1); // 음수 길이 배열
-			//    try {
-			//        var arr = new Array(-1); // 음수 길이 배열
-			//    } catch(err) {
-			//        // 에러를 직접 분석
-			//        if (window.AISupport && window.AISupport.ready) {
-			//            console.log("[테스트] 에러를 AI로 분석 요청...");
-			//            window.AISupport.analyze(err);
-			//        } else if (window.AISupport) {
-			//            console.log("[테스트] AI 엔진이 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.");
-			//        }
-			//        // 원래 에러도 다시 던져서 콘솔에 표시
-			//        throw err;
-			//    }
+			    
+			    var arr = new Array(-1); // 음수 길이 배열
 
-			}
-
-			/*
-			 * "Button" 버튼(btn2)에서 click 이벤트 발생 시 호출.
-			 * 사용자가 컨트롤을 클릭할 때 발생하는 이벤트.
-			 */
-			function onBtn2Click(e){
-				var btn2 = e.control;
-				app.lookup("cmb1").addItem(new cpr.controls.Item("label1","value1"));
 			};
 			// End - User Script
 			
