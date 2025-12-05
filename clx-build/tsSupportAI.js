@@ -1,11 +1,10 @@
 /**
- * AI Error Assistant - 기술 지원용 에러 분석 라이브러리 (수정 버전)
+ * AI Error Assistant - 기술 지원용 에러 분석 라이브러리 (일관된 양식 출력 버전)
  * 
- * 주요 수정 사항:
- * 1. 한국어 프롬프트 개선 (시스템 프롬프트 추가)
- * 2. 에러 정보 포맷 개선
- * 3. 중복 에러 분석 방지
- * 4. 분석 결과 캐싱
+ * 주요 개선 사항:
+ * 1. 양식 준수를 위한 강력한 프롬프트 엔지니어링
+ * 2. 출력 형식 검증 및 후처리
+ * 3. 구조화된 응답 파싱
  */
 
 (function (global) {
@@ -46,19 +45,13 @@
     ready: false,
     initialized: false,
     errorQueue: [],
-    analyzedErrors: {}, // 중복 에러 방지용 캐시
-    analyzing: false, // 분석 중 플래그
+    analyzedErrors: {},
+    analyzing: false,
 
-    /**
-     * 에러 해시 생성 (중복 체크용)
-     */
     getErrorHash: function(errObj) {
       return (errObj.name || '') + ':' + (errObj.message || '').substring(0, 100);
     },
 
-    /**
-     * WebLLM 엔진 초기화
-     */
     init: function () {
       if (this.initialized) {
         console.warn("[AI Error Assistant] 이미 초기화되었습니다.");
@@ -93,9 +86,6 @@
       });
     },
 
-    /**
-     * WebLLM 엔진 초기화 (내부 함수)
-     */
     initializeEngine: function(CreateMLCEngine) {
       var modelName = "Qwen2.5-0.5B-Instruct-q4f32_1-MLC";
       
@@ -106,7 +96,7 @@
         initProgressCallback: function(progress) {
           if (progress.progress !== undefined && progress.progress > 0) {
             var percent = Math.round(progress.progress * 100);
-            if (percent % 10 === 0) { // 10%마다만 로그
+            if (percent % 10 === 0) {
               console.log("[AI Error Assistant] 모델 로딩: " + percent + "%");
             }
           }
@@ -116,7 +106,6 @@
         AISupport.ready = true;
         console.log("[AI Error Assistant] ✓ WebLLM 엔진 로드 완료");
         
-        // 큐에 쌓인 에러 처리
         if (AISupport.errorQueue.length > 0) {
           console.log("[AI Error Assistant] 큐에 쌓인 에러 " + AISupport.errorQueue.length + "개 분석 시작");
           for (var i = 0; i < AISupport.errorQueue.length; i++) {
@@ -131,10 +120,126 @@
     },
 
     /**
-     * 에러 분석 처리 (개선된 버전)
+     * 응답 형식 검증 및 정규화 (반복 제거 포함)
      */
+    normalizeAIResponse: function(content) {
+      var lines = content.split('\n');
+      var result = [];
+      var sections = {
+        section1: [],
+        section2: [],
+        section3: [],
+        section4: []
+      };
+      var currentSection = null;
+      var inCodeBlock = false;
+      var seenChecklistItems = {};
+      
+      // 섹션별로 분류하고 반복 제거
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
+        var trimmed = line.trim();
+        
+        // 섹션 구분
+        if (trimmed.match(/^1\.\s*에러\s*원인/)) {
+          currentSection = 'section1';
+          sections.section1.push(line);
+          continue;
+        } else if (trimmed.match(/^2\.\s*왜\s*발생/)) {
+          currentSection = 'section2';
+          sections.section2.push(line);
+          continue;
+        } else if (trimmed.match(/^3\.\s*해결\s*방법/)) {
+          currentSection = 'section3';
+          sections.section3.push(line);
+          inCodeBlock = false;
+          continue;
+        } else if (trimmed.match(/^4\.\s*개발자\s*체크리스트/)) {
+          currentSection = 'section4';
+          sections.section4.push(line);
+          seenChecklistItems = {};
+          continue;
+        }
+        
+        // 코드 블록 추적
+        if (trimmed.indexOf('```') !== -1) {
+          inCodeBlock = !inCodeBlock;
+        }
+        
+        // 현재 섹션에 추가
+        if (currentSection) {
+          // 섹션4 (체크리스트) 중복 제거
+          if (currentSection === 'section4' && trimmed.indexOf('•') !== -1) {
+            // 중복 체크
+            if (!seenChecklistItems[trimmed]) {
+              seenChecklistItems[trimmed] = true;
+              sections[currentSection].push(line);
+            }
+          } else {
+            sections[currentSection].push(line);
+          }
+        }
+      }
+      
+      // 섹션4 체크리스트 항목이 3개 이상이면 상위 3개만 유지
+      if (sections.section4.length > 4) { // 제목 + 3개 항목
+        var filtered = [sections.section4[0]]; // 제목 유지
+        var itemCount = 0;
+        for (var j = 1; j < sections.section4.length; j++) {
+          if (sections.section4[j].trim().indexOf('•') !== -1) {
+            if (itemCount < 3) {
+              filtered.push(sections.section4[j]);
+              itemCount++;
+            }
+          } else {
+            filtered.push(sections.section4[j]);
+          }
+        }
+        sections.section4 = filtered;
+      }
+      
+      // 결과 조합
+      if (sections.section1.length > 0) {
+        result = result.concat(sections.section1);
+        result.push('');
+      } else {
+        result.push('1. 에러 원인:');
+        result.push('   에러 분석 중...');
+        result.push('');
+      }
+      
+      if (sections.section2.length > 0) {
+        result = result.concat(sections.section2);
+        result.push('');
+      } else {
+        result.push('2. 왜 발생했나:');
+        result.push('   자세한 분석이 필요합니다.');
+        result.push('');
+      }
+      
+      if (sections.section3.length > 0) {
+        result = result.concat(sections.section3);
+        result.push('');
+      } else {
+        result.push('3. 해결 방법:');
+        result.push('   ```javascript');
+        result.push('   // 코드 검토가 필요합니다');
+        result.push('   ```');
+        result.push('');
+      }
+      
+      if (sections.section4.length > 0) {
+        result = result.concat(sections.section4);
+      } else {
+        result.push('4. 개발자 체크리스트:');
+        result.push('   • 에러 메시지 확인');
+        result.push('   • 스택 트레이스 분석');
+      }
+
+      return result.join('\n');
+    },
+
     handleError: function (errObj) {
-      // 중복 에러 체크
       var errorHash = this.getErrorHash(errObj);
       var now = Date.now();
       
@@ -155,7 +260,6 @@
         console.log("위치:", errObj.source + ":" + errObj.lineno);
       }
       
-      // 스택 트레이스에서 실제 에러 위치 추출
       if (errObj.stack) {
         var stackLines = errObj.stack.split('\n');
         var relevantLine = null;
@@ -172,7 +276,6 @@
       }
       console.log("%c" + "=".repeat(70), "color:#ff6600; font-weight:bold");
 
-      // 엔진이 준비되지 않았으면 큐에 추가
       if (!this.ready || !this.engine) {
         console.log("[AI Error Assistant] 엔진 준비 중. 에러를 큐에 추가합니다.");
         if (this.errorQueue.length < 10) {
@@ -181,17 +284,15 @@
         return;
       }
 
-      // 이미 분석 중이면 대기
       if (this.analyzing) {
         console.log("[AI Error Assistant] 이미 분석 중입니다. 완료 후 다시 시도하세요.");
         return;
       }
 
-      // AI 분석 시작
       this.analyzing = true;
       console.log("%c[AI Error Assistant] 🔍 AI 에러 분석 시작...", "color:#2196F3; font-weight:bold");
       
-      // 개선된 프롬프트 - 실제 코드 컨텍스트 포함
+      // 에러 정보 구성
       var errorInfo = "에러 타입: " + (errObj.name || "Unknown") + "\n" +
                      "에러 메시지: " + (errObj.message || "N/A") + "\n";
       
@@ -199,7 +300,6 @@
         errorInfo += "발생 위치: " + errObj.source + " (줄: " + errObj.lineno + ")\n";
       }
       
-      // 스택에서 실제 에러 위치 강조
       if (errObj.stack) {
         var stackLines = errObj.stack.split('\n');
         var actualErrorLine = null;
@@ -219,7 +319,7 @@
         errorInfo += "\n전체 스택:\n" + stackLines.slice(0, 3).join('\n') + "\n";
       }
 
-      // 하이브리드 방식: 주요 패턴은 힌트 제공, 나머지는 AI 추론
+      // 에러 힌트 생성
       var errorHint = "";
       var isExBuilder = errObj.framework === "eXBuilder6" || 
                         (errObj.message && errObj.message.indexOf('controltype') !== -1);
@@ -227,7 +327,6 @@
       if (isExBuilder) {
         errorHint = "\n[프레임워크] eXBuilder6 UI 프레임워크 에러\n";
         
-        // 주요 eXBuilder6 패턴 힌트
         var msg = errObj.message.toLowerCase();
         if (msg.indexOf('duplicated') !== -1) {
           errorHint += "\n💡 일반적 원인:\n" +
@@ -246,7 +345,6 @@
                       "• 이벤트 시점 문제 (컨트롤 생성 전 접근)\n";
         }
       } else {
-        // 표준 JavaScript 에러 힌트
         var msg = errObj.message.toLowerCase();
         if (msg.indexOf('rangeerror') !== -1 || msg.indexOf('invalid array length') !== -1) {
           errorHint = "\n💡 일반적 원인:\n" +
@@ -282,7 +380,6 @@
         }
       }
       
-      // eXBuilder6 컨트롤 정보
       var exbuilderInfo = "";
       if (isExBuilder && errObj.exbuilder) {
         exbuilderInfo = "\n[컨트롤 정보]\n";
@@ -297,26 +394,27 @@
         }
       }
 
-      var prompt = "당신은 JavaScript와 UI 솔루션 eXBuilder6 전문가입니다. 아래 에러를 분석하세요.\n\n" +
-                   "=== 에러 정보 ===\n" +
+      // 강화된 프롬프트 - 양식 준수 강제 + 간결함 강조
+      var prompt = "=== 에러 정보 ===\n" +
                    errorInfo + 
                    exbuilderInfo +
-                   errorHint + "\n" +
-                   "=== 분석 요청 (한국어로만 답변) ===\n\n" +
-                   "1. 에러 원인: (정확히 무엇이 문제인지 한 문장으로)\n\n" +
+                   errorHint + "\n\n" +
+                   "=== 분석 지침 (간결하게 작성) ===\n" +
+                   "아래 양식을 정확히 따라 작성하세요.\n\n" +
+                   "1. 에러 원인:\n" +
+                   "   (한 문장)\n\n" +
                    "2. 왜 발생했나:\n" +
-                   "   위의 💡 일반적 원인을 참고하여 구체적으로 설명(왜 오류가 발생했는지 구체적으로 작성)\n" +
-                   (isExBuilder ? "   eXBuilder6 API 사용법을 고려하여 설명\n" : "") + "\n" +
+                   "   (2줄 이내)\n\n" +
                    "3. 해결 방법:\n" +
                    "   ```javascript\n" +
-                   "   // ❌ 문제가 되는 코드(오류의 원인이 되는 코드를 찾아서 작성)\n" +
-                   "   \n" +
-                   "   // ✅ 올바른 코드(오류 원인이 되는 코드 개선안 작성)\n" +
+                   "   // ❌ 문제 코드\n" +
+                   "   // ✅ 수정 코드\n" +
                    "   ```\n\n" +
                    "4. 개발자 체크리스트:\n" +
-                   "   • 확인할 사항 1\n" +
-                   "   • 확인할 사항 2\n\n" +
-                   "주의: 답변 할 경우 상단의 양식으로 답변하세요. 반드시 한국어로만 답변하고, 파이썬/Java 등 다른 언어는 언급하지 마세요.( 주의 문장은 답변시 남기지 않도록합니다.)";
+                   "   • (항목1)\n" +
+                   "   • (항목2)\n" +
+                   "   • (항목3)\n\n" +
+                   "⚠️ 중요: 체크리스트는 정확히 3개만 작성. 같은 내용 반복 금지.";
 
       var self = this;
       this.engine.chat.completions
@@ -324,32 +422,41 @@
           messages: [
             { 
               role: "system", 
-              content: "당신은 JavaScript와 UI 솔루션 eXBuilder6 전문가입니다.\n" +
-                       "에러 정보와 💡 일반적 원인 힌트를 참고하여 정확하게 분석하세요.\n" +
-                       "규칙:\n" +
-                       "- 항상 한국어로만 답변 (Why, How 같은 영어 단어 사용 금지)\n" +
-                       "- 💡 힌트를 기반으로 구체적인 해결책 제시\n" +
-                       "- 코드 예시는 실제 동작하는 코드로 작성\n" +
-                       "- 파이썬, Java 등 다른 언어 절대 언급 금지"
+              content: "당신은 JavaScript와 eXBuilder6 전문가입니다.\n\n" +
+                       "**중요 규칙**:\n" +
+                       "1. 반드시 아래 양식 그대로 작성\n" +
+                       "2. 각 섹션은 간결하게 (섹션2는 2줄 이내)\n" +
+                       "3. 체크리스트는 정확히 3개 항목만\n" +
+                       "4. 같은 내용 반복 절대 금지\n" +
+                       "5. 한국어로만 작성\n" +
+                       "6. 양식 외 추가 설명 금지\n\n" +
+                       "출력 양식:\n" +
+                       "1. 에러 원인:\n   (1줄)\n\n" +
+                       "2. 왜 발생했나:\n   (2줄)\n\n" +
+                       "3. 해결 방법:\n   ```javascript\n   코드\n   ```\n\n" +
+                       "4. 개발자 체크리스트:\n   • 항목1\n   • 항목2\n   • 항목3"
             },
             { 
               role: "user", 
               content: prompt 
             }
           ],
-          temperature: 0.3,
-          max_tokens: 600,
-          top_p: 0.9
+          temperature: 0.1,
+          max_tokens: 500,
+          top_p: 0.8
         })
         .then(function (res) {
           self.analyzing = false;
           var content = res.choices[0].message.content;
           
+          // 응답 정규화
+          var normalizedContent = self.normalizeAIResponse(content);
+          
           console.log("%c" + "=".repeat(70), "color:#4CAF50; font-weight:bold");
           console.log("%c🤖 AI 에러 분석 결과", "color:#ffffff; background:#4CAF50; font-weight:bold; font-size:14px; padding:5px");
           console.log("%c" + "=".repeat(70), "color:#4CAF50; font-weight:bold");
           console.log("");
-          console.log(content);
+          console.log(normalizedContent);
           console.log("");
           console.log("%c" + "=".repeat(70), "color:#4CAF50; font-weight:bold");
           console.log("%c💡 개발자 도구(F12) Console에서 확인하세요", "color:#666; font-style:italic");
@@ -361,9 +468,6 @@
         });
     },
 
-    /**
-     * 수동 에러 분석
-     */
     analyze: function (error) {
       var errObj;
       
@@ -398,11 +502,7 @@
   var originalConsoleError = console.error;
   var aiErrorHandler;
 
-  /**
-   * AI Error Handler
-   */
   aiErrorHandler = function(msg, src, line, col, error) {
-    // 기존 핸들러 실행
     if (originalOnError && typeof originalOnError === 'function' && originalOnError !== aiErrorHandler) {
       try {
         originalOnError.call(this, msg, src, line, col, error);
@@ -411,7 +511,6 @@
       }
     }
 
-    // 에러 객체 생성
     var errObj = {
       name: error && error.name ? error.name : "Error",
       message: msg || (error && error.message ? error.message : "Unknown error"),
@@ -429,9 +528,6 @@
     return false;
   };
 
-  /**
-   * 에러 핸들러 설치
-   */
   function installErrorHandler() {
     if (window.onerror === aiErrorHandler) {
       return;
@@ -452,19 +548,15 @@
   installErrorHandler();
 
   // ============================================================
-  // console.error/warn/log 후킹 (모든 에러 캡처)
+  // console.error/warn 후킹
   // ============================================================
   var originalConsoleWarn = console.warn;
   var originalConsoleLog = console.log;
   
-  /**
-   * 에러 메시지 감지 함수 (개선됨)
-   */
   function isErrorMessage(message) {
     if (!message) return false;
     var msg = String(message).toLowerCase();
     
-    // JavaScript 기본 에러
     if (msg.indexOf('error') !== -1 ||
         msg.indexOf('exception') !== -1 ||
         msg.indexOf('uncaught') !== -1 ||
@@ -472,7 +564,6 @@
       return true;
     }
     
-    // eXBuilder6 특화 에러 패턴
     if (msg.indexOf('duplicated') !== -1 ||
         msg.indexOf('invalid') !== -1 ||
         msg.indexOf('cannot') !== -1 ||
@@ -492,7 +583,6 @@
     var errorObj = null;
     var fullMessage = '';
     
-    // 모든 인자를 문자열로 합침
     for (var i = 0; i < args.length; i++) {
       if (args[i] instanceof Error) {
         errorObj = args[i];
@@ -507,7 +597,6 @@
       }
     }
     
-    // 모든 에러 메시지 캡처 (조건 완화)
     if (isErrorMessage(fullMessage) || errorObj !== null) {
       var errObj = {
         name: errorObj ? errorObj.name : "Error",
@@ -519,18 +608,15 @@
         fullArgs: args
       };
       
-      // 스택에서 실제 소스 추출 (eXBuilder6 패턴 포함)
       if (errObj.stack) {
         var stackLines = errObj.stack.split('\n');
         for (var j = 0; j < stackLines.length; j++) {
           var line = stackLines[j];
-          // .clx.js 또는 eXBuilder 관련 파일 찾기
           if (line.indexOf('.clx.js') !== -1 || 
               line.indexOf('test.') !== -1 ||
               line.indexOf('cleopatra.js') !== -1) {
             errObj.source = line.trim();
             
-            // 줄 번호 추출
             var lineMatch = line.match(/:(\d+):(\d+)/);
             if (lineMatch) {
               errObj.lineno = parseInt(lineMatch[1]);
@@ -541,11 +627,9 @@
         }
       }
       
-      // eXBuilder6 특화 정보 추출
       if (fullMessage.indexOf('controltype') !== -1) {
         errObj.framework = "eXBuilder6";
         
-        // controltype, id, value 추출
         var controltypeMatch = fullMessage.match(/controltype:\s*(\w+)/);
         var idMatch = fullMessage.match(/id:\s*(\w+)/);
         var valueMatch = fullMessage.match(/value:\s*([^\]]+)/);
@@ -567,7 +651,6 @@
     }
   };
   
-  // console.warn도 후킹 (eXBuilder6 경고 캡처)
   console.warn = function() {
     var args = Array.prototype.slice.call(arguments);
     originalConsoleWarn.apply(console, args);
@@ -577,7 +660,6 @@
       fullMessage += String(args[i]) + '\n';
     }
     
-    // 에러 관련 경고만 캡처
     if (isErrorMessage(fullMessage)) {
       var errObj = {
         name: "Warning",
@@ -588,7 +670,6 @@
         timestamp: new Date().toISOString()
       };
       
-      // eXBuilder6 정보 추출
       if (fullMessage.indexOf('controltype') !== -1) {
         errObj.framework = "eXBuilder6";
         var controltypeMatch = fullMessage.match(/controltype:\s*(\w+)/);
@@ -615,7 +696,6 @@
   
   console.log("[AI Error Assistant] ✓ console.error/warn 후킹 완료");
 
-  // defineProperty로 보호
   try {
     Object.defineProperty(window, 'onerror', {
       get: function() {
@@ -633,7 +713,6 @@
     // 무시
   }
 
-  // 주기적 체크
   var checkInterval = setInterval(function() {
     if (window.onerror !== aiErrorHandler) {
       installErrorHandler();
@@ -646,9 +725,6 @@
     }
   });
 
-  /**
-   * Promise rejection 후킹
-   */
   window.addEventListener("unhandledrejection", function (event) {
     var error = event.reason;
     var errObj;
