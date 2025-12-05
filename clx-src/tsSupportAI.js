@@ -297,7 +297,7 @@
         }
       }
 
-      var prompt = "당신은 JavaScript와 eXBuilder6 전문가입니다. 아래 에러를 분석하세요.\n\n" +
+      var prompt = "당신은 JavaScript와 UI 솔루션 eXBuilder6 전문가입니다. 아래 에러를 분석하세요.\n\n" +
                    "=== 에러 정보 ===\n" +
                    errorInfo + 
                    exbuilderInfo +
@@ -316,7 +316,7 @@
                    "4. 개발자 체크리스트:\n" +
                    "   • 확인할 사항 1\n" +
                    "   • 확인할 사항 2\n\n" +
-                   "주의: 반드시 한국어로만 답변하고, 파이썬/Java 등 다른 언어는 언급하지 마세요.";
+                   "주의: 반드시 한국어로만 답변하고, 파이썬/Java 등 다른 언어는 언급하지 마세요. 무조건 위의 틀(양식)으로 답변하세요.";
 
       var self = this;
       this.engine.chat.completions
@@ -324,7 +324,7 @@
           messages: [
             { 
               role: "system", 
-              content: "당신은 JavaScript와 eXBuilder6 전문가입니다.\n" +
+              content: "당신은 JavaScript와 UI 솔루션 eXBuilder6 전문가입니다.\n" +
                        "에러 정보와 💡 일반적 원인 힌트를 참고하여 정확하게 분석하세요.\n" +
                        "규칙:\n" +
                        "- 항상 한국어로만 답변 (Why, How 같은 영어 단어 사용 금지)\n" +
