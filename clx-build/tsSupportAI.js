@@ -5,11 +5,6 @@
  * 1. 자동 에러 감지 및 AI 분석
  * 2. 콘솔에서 AI와 자유롭게 대화
  * 3. 확장된 에러 힌트 데이터베이스
- * 
- * 사용법:
- * - 에러 자동 분석: 자동으로 작동
- * - 채팅: chat("질문") 
- * - 도움말: chatHelp()
  */
 
 (function (global) {
@@ -18,34 +13,32 @@
   // ============================================================
   // 설정
   // ============================================================
-	var CONFIG = {
-	  modelName: "Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
-	
-	  // 사용 가능한 모델 목록
-	  availableModels: {
-	    "qwen-0.5b": "Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
-	    "qwen-1.5b": "Qwen2.5-1.5B-Instruct-q4f32_1-MLC",
-	    "qwen-3b":   "Qwen2.5-3B-Instruct-q4f32_1-MLC",
-	
-	    "phi-3-mini":     "Phi-3-mini-4k-instruct-q4f32_1-MLC",   // 3.8B
-	    "llama-3.2-1b":   "Llama-3.2-1B-Instruct-q4f32_1-MLC",
-	    "llama-3.2-3b":   "Llama-3.2-3B-Instruct-q4f32_1-MLC"
-	  },
-	
-	  webllmURL: "../ui/web-llm/web-llm.min.js",
-	
-	  errorAnalysisSettings: {
-	    temperature: 0.1,
-	    max_tokens: 500,
-	    top_p: 0.8
-	  },
-	
-	  chatSettings: {
-	    temperature: 0.3,
-	    max_tokens: 800,
-	    top_p: 0.85
-	  }
-	};
+  var CONFIG = {
+    modelName: "Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+    
+    availableModels: {
+      "qwen-0.5b": "Qwen2.5-0.5B-Instruct-q4f32_1-MLC",
+      "qwen-1.5b": "Qwen2.5-1.5B-Instruct-q4f32_1-MLC",
+      "qwen-3b":   "Qwen2.5-3B-Instruct-q4f32_1-MLC",
+      "phi-3-mini": "Phi-3-mini-4k-instruct-q4f32_1-MLC",
+      "llama-3.2-1b": "Llama-3.2-1B-Instruct-q4f32_1-MLC",
+      "llama-3.2-3b": "Llama-3.2-3B-Instruct-q4f32_1-MLC"
+    },
+    
+    webllmURL: "../ui/web-llm/web-llm.min.js",
+    
+    errorAnalysisSettings: {
+      temperature: 0.1,
+      max_tokens: 500,
+      top_p: 0.8
+    },
+    
+    chatSettings: {
+      temperature: 0.3,
+      max_tokens: 800,
+      top_p: 0.85
+    }
+  };
 
   // ============================================================
   // ES Module 동적 로더
@@ -228,7 +221,6 @@
         console.log("  ✓ AI 채팅: chat('질문')");
         console.log("  ✓ 도움말: chatHelp()");
         
-        // 에러 큐 처리
         if (ErrorAnalyzer.errorQueue.length > 0) {
           console.log("[AI Assistant] 큐에 쌓인 에러 " + ErrorAnalyzer.errorQueue.length + "개 분석 시작");
           for (var i = 0; i < ErrorAnalyzer.errorQueue.length; i++) {
@@ -327,7 +319,6 @@
         }
       }
       
-      // 섹션4 체크리스트 3개로 제한
       if (sections.section4.length > 4) {
         var filtered = [sections.section4[0]];
         var itemCount = 0;
@@ -344,7 +335,6 @@
         sections.section4 = filtered;
       }
       
-      // 결과 조합
       if (sections.section1.length > 0) {
         result = result.concat(sections.section1);
         result.push('');
@@ -394,7 +384,6 @@
       }
       this.analyzedErrors[errorHash] = now;
 
-      // 기본 에러 정보 출력
       console.log("%c" + "=".repeat(70), "color:#ff6600; font-weight:bold");
       console.log("%c⚠️ JavaScript 에러 발생", "color:#ffffff; background:#ff6600; font-weight:bold; font-size:14px; padding:5px");
       console.log("%c" + "=".repeat(70), "color:#ff6600; font-weight:bold");
@@ -431,7 +420,6 @@
       this.analyzing = true;
       console.log("%c[AI Assistant] 🔍 AI 에러 분석 시작...", "color:#2196F3; font-weight:bold");
       
-      // 에러 정보 구성
       var errorInfo = "에러 타입: " + (errObj.name || "Unknown") + "\n" +
                      "에러 메시지: " + (errObj.message || "N/A") + "\n";
       
@@ -472,31 +460,27 @@
         }
       }
 
-      // 에러 힌트가 있으면 간단한 분석으로 충분
-      if (errorHint && errorHint.trim().length > 0) {
-        console.log("%c" + "=".repeat(70), "color:#4CAF50; font-weight:bold");
-        console.log("%c💡 에러 힌트", "color:#ffffff; background:#4CAF50; font-weight:bold; font-size:14px; padding:5px");
-        console.log("%c" + "=".repeat(70), "color:#4CAF50; font-weight:bold");
-        console.log("");
-        console.log(errorHint);
-        console.log("");
-        console.log("%c" + "=".repeat(70), "color:#4CAF50; font-weight:bold");
-        
-        // 힌트가 있으면 상세 AI 분석은 선택적으로
-        this.analyzing = false;
-        return;
-      }
-
       var prompt = "=== 에러 정보 ===\n" +
                    errorInfo + 
                    exbuilderInfo +
                    errorHint + "\n\n" +
                    "=== 분석 지침 ===\n" +
-                   "아래 양식을 정확히 따라 간결하게 작성하세요.\n\n" +
-                   "1. 에러 원인:\n   (한 문장)\n\n" +
-                   "2. 왜 발생했나:\n   (2줄 이내)\n\n" +
-                   "3. 해결 방법:\n   ```javascript\n   // 코드\n   ```\n\n" +
-                   "4. 개발자 체크리스트:\n   • (항목1)\n   • (항목2)\n   • (항목3)";
+                   "위의 에러 정보와 💡 힌트를 참고하여 아래 양식으로 분석하세요.\n\n" +
+                   "1. 에러 원인:\n" +
+                   "   (한 문장으로 핵심 원인)\n\n" +
+                   "2. 왜 발생했나:\n" +
+                   (errorHint ? "   (위 💡 일반적 원인을 바탕으로 2줄 이내로 구체적 설명)\n\n" : "   (2줄 이내로 설명)\n\n") +
+                   "3. 해결 방법:\n" +
+                   "   ```javascript\n" +
+                   "   // ❌ 문제 코드 (예상되는 오류 원인)\n" +
+                   "   \n" +
+                   "   // ✅ 수정 코드 (올바른 방법)\n" +
+                   "   ```\n\n" +
+                   "4. 개발자 체크리스트:\n" +
+                   "   • (확인할 사항 1)\n" +
+                   "   • (확인할 사항 2)\n" +
+                   "   • (확인할 사항 3)\n\n" +
+                   "⚠️ 중요: 체크리스트는 정확히 3개만 작성. 같은 내용 반복 금지.";
 
       var self = this;
       AIEngine.engine.chat.completions
@@ -504,7 +488,19 @@
           messages: [
             { 
               role: "system", 
-              content: "당신은 JavaScript와 eXBuilder6 전문가입니다. 주어진 양식을 정확히 따라 간결하게 작성하세요."
+              content: "당신은 JavaScript와 eXBuilder6 전문가입니다.\n\n" +
+                       "**중요 규칙**:\n" +
+                       "1. 반드시 아래 양식 그대로 작성\n" +
+                       "2. 💡 힌트가 제공되면 이를 적극 활용하여 '왜 발생했나' 섹션 작성\n" +
+                       "3. 각 섹션은 간결하게 (섹션2는 2줄 이내)\n" +
+                       "4. 체크리스트는 정확히 3개 항목만\n" +
+                       "5. 같은 내용 반복 절대 금지\n" +
+                       "6. 한국어로만 작성\n\n" +
+                       "출력 양식:\n" +
+                       "1. 에러 원인:\n   (1줄)\n\n" +
+                       "2. 왜 발생했나:\n   (2줄, 💡 힌트 활용)\n\n" +
+                       "3. 해결 방법:\n   ```javascript\n   코드\n   ```\n\n" +
+                       "4. 개발자 체크리스트:\n   • 항목1\n   • 항목2\n   • 항목3"
             },
             { 
               role: "user", 
@@ -540,8 +536,12 @@
   // ============================================================
   var ChatManager = {
     conversationHistory: [],
-    systemPrompt: "당신은 JavaScript 전문가입니다. 모든 답변은 한국어로 설명하고 JavaScript 코드 예제를 제공하세요. 절대 Python이나 다른 언어 코드를 사용하지 마세요. JavaScript 문법(const, let, 화살표 함수, .sort(), .map() 등)만 사용하세요.",
-    settings: Object.assign({}, CONFIG.chatSettings),
+    systemPrompt: "당신은 JavaScript 전문가입니다. 모든 답변은 한국어로 설명하고 JavaScript 코드 예제를 제공하세요.",
+    settings: {
+      temperature: CONFIG.chatSettings.temperature,
+      max_tokens: CONFIG.chatSettings.max_tokens,
+      top_p: CONFIG.chatSettings.top_p
+    },
 
     sendMessage: function(userMessage) {
       var self = this;
@@ -553,30 +553,9 @@
           return;
         }
 
-        // JavaScript 관련 키워드 감지
-        var jsKeywords = ['자바스크립트', 'javascript', 'js', '배열', 'array', '함수', 'function', 
-                          '객체', 'object', '정렬', 'sort', '반복문', 'loop', 'for', 'const', 'let',
-                          '오브젝트', '키', 'key', 'value', '값', 'map', 'filter', 'reduce'];
-        var isJSQuestion = false;
-        var lowerMsg = userMessage.toLowerCase();
-        
-        for (var i = 0; i < jsKeywords.length; i++) {
-          if (lowerMsg.indexOf(jsKeywords[i]) !== -1) {
-            isJSQuestion = true;
-            break;
-          }
-        }
-
-        // JavaScript 질문이면 강제로 JavaScript 답변 유도
-        var enhancedMessage = userMessage;
-        if (isJSQuestion) {
-          enhancedMessage = userMessage + 
-                           "\n\n[중요: 반드시 JavaScript 코드로만 답변하세요. Python 코드는 사용하지 마세요. 한국어로 설명하고 JavaScript 예제를 제공하세요.]";
-        }
-
         self.conversationHistory.push({
           role: "user",
-          content: enhancedMessage
+          content: userMessage
         });
 
         var messages = [
@@ -586,7 +565,6 @@
         console.log("%c[User] " + userMessage, "color: #2196F3; font-weight: bold");
         console.log("%c[AI] 생각하는 중...", "color: #9E9E9E; font-style: italic");
 
-        var fullResponse = "";
         var startTime = Date.now();
 
         AIEngine.engine.chat.completions.create({
@@ -595,16 +573,7 @@
           max_tokens: self.settings.max_tokens,
           top_p: self.settings.top_p
         }).then(function(res) {
-          fullResponse = res.choices[0].message.content;
-          
-          // Python 코드가 포함되어 있으면 경고
-          if (fullResponse.indexOf('```python') !== -1 || 
-              fullResponse.indexOf('Python') !== -1 ||
-              fullResponse.indexOf('.sort()') !== -1 && fullResponse.indexOf('arr.sort()') !== -1) {
-            console.warn("%c⚠️ AI가 Python 코드를 생성했습니다. JavaScript로 다시 요청해보세요.", "color: #FF9800; font-weight: bold");
-            console.log("%c💡 시도: chatJS('질문') 또는 더 명확하게 'JavaScript 코드로' 라고 명시하세요.", "color: #2196F3");
-          }
-          
+          var fullResponse = res.choices[0].message.content;
           var elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
           
           console.log("%c[AI] " + fullResponse, "color: #4CAF50; font-weight: bold");
@@ -623,28 +592,14 @@
       });
     },
 
-    getHistory: function() {
-      return this.conversationHistory;
-    },
-
     clearHistory: function() {
       this.conversationHistory = [];
       console.log("[AI Assistant] 🗑️ 대화 이력이 초기화되었습니다.");
-    },
-
-    setSystemPrompt: function(prompt) {
-      this.systemPrompt = prompt;
-      console.log("[AI Assistant] ⚙️ 시스템 프롬프트 변경됨");
-    },
-
-    updateSettings: function(newSettings) {
-      Object.assign(this.settings, newSettings);
-      console.log("[AI Assistant] ⚙️ 설정 변경됨:", this.settings);
     }
   };
 
   // ============================================================
-  // 글로벌 함수 노출 (채팅)
+  // 글로벌 함수 노출
   // ============================================================
   global.chat = function(message) {
     if (typeof message !== 'string' || message.trim() === '') {
@@ -667,167 +622,25 @@
     });
   };
 
-  global.chatHistory = function() {
-    var history = ChatManager.getHistory();
-    
-    if (history.length === 0) {
-      console.log("[AI Assistant] 📭 대화 이력이 없습니다.");
-      return;
-    }
-
-    console.log("%c=== 대화 이력 (" + history.length + "개) ===", 
-                "color: #2196F3; font-weight: bold; font-size: 14px");
-    
-    for (var i = 0; i < history.length; i++) {
-      var msg = history[i];
-      if (msg.role === "user") {
-        console.log("%c[User] " + msg.content, "color: #2196F3");
-      } else if (msg.role === "assistant") {
-        console.log("%c[AI] " + msg.content, "color: #4CAF50");
-      }
-    }
-    
-    console.log("%c" + "=".repeat(50), "color: #2196F3");
-  };
-
   global.clearChat = function() {
     ChatManager.clearHistory();
   };
 
-  global.chatConfig = function(settings) {
-    if (typeof settings !== 'object') {
-      console.log("[AI Assistant] 현재 설정:", ChatManager.settings);
-      console.log("변경하려면: chatConfig({ temperature: 0.8, max_tokens: 1000 })");
-      return;
-    }
-    ChatManager.updateSettings(settings);
-  };
-
-  global.chatSystem = function(prompt) {
-    if (typeof prompt !== 'string') {
-      console.log("[AI Assistant] 현재 시스템 프롬프트:", ChatManager.systemPrompt);
-      console.log("변경하려면: chatSystem('당신은 프로그래밍 전문가입니다.')");
-      return;
-    }
-    ChatManager.setSystemPrompt(prompt);
-  };
-
-  global.chatJS = function(message) {
-    // JavaScript 전문 모드로 강제 설정
-    if (typeof message !== 'string' || message.trim() === '') {
-      console.error("[AI Assistant] ❌ 메시지를 입력해주세요.");
-      return;
-    }
-
-    if (!AIEngine.ready) {
-      console.log("[AI Assistant] ⏳ 초기화 중입니다. 잠시 후 다시 시도해주세요.");
-      return;
-    }
-
-    // 명확한 JavaScript 요청으로 변환 (한국어)
-    var jsMessage = message + 
-                   "\n\n[중요 지침]\n" +
-                   "1. 반드시 JavaScript 코드로만 답변하세요\n" +
-                   "2. Python, Java 등 다른 언어는 절대 사용 금지\n" +
-                   "3. 한국어로 설명하고 JavaScript 예제 제공\n" +
-                   "4. const, let, 화살표 함수(=>), .map(), .filter() 등 최신 문법 사용\n" +
-                   "5. 실용적이고 간단한 코드 예제를 보여주세요";
-    
-    console.log("%c[JavaScript 전용 모드]", "color: #FF9800; font-weight: bold");
-    ChatManager.sendMessage(jsMessage).catch(function(err) {
-      console.error("[AI Assistant] 오류:", err);
-    });
-  };
-
-  global.switchModel = function(modelKey) {
-    if (!modelKey) {
-      console.log("%c사용 가능한 모델:", "color: #2196F3; font-weight: bold");
-      console.log("");
-      for (var key in CONFIG.availableModels) {
-        var marker = CONFIG.availableModels[key] === CONFIG.modelName ? "✓ " : "  ";
-        console.log(marker + key + ": " + CONFIG.availableModels[key]);
-      }
-      console.log("");
-      console.log("사용법: switchModel('모델키')");
-      console.log("예시: switchModel('qwen-1.5b')");
-      return;
-    }
-
-    if (CONFIG.availableModels[modelKey]) {
-      CONFIG.modelName = CONFIG.availableModels[modelKey];
-      console.log("%c모델 변경됨: " + CONFIG.modelName, "color: #4CAF50; font-weight: bold");
-      console.log("새 모델을 적용하려면 페이지를 새로고침하세요.");
-    } else {
-      console.error("❌ 알 수 없는 모델입니다. switchModel() 으로 목록을 확인하세요.");
-    }
-  };
-
-  global.analyzeError = function() {
-    console.log("%c=== 수동 에러 분석 ===", "color: #2196F3; font-weight: bold");
-    console.log("다음 명령어로 에러를 분석할 수 있습니다:");
-    console.log("");
-    console.log("1. 마지막 에러 재분석 (AI 사용):");
-    console.log("   analyzeLastError()");
-    console.log("");
-    console.log("2. 에러 힌트만 다시 보기:");
-    console.log("   showErrorHints()");
-  };
-
-  global.analyzeLastError = function() {
-    // 마지막 에러를 AI로 재분석 (힌트 무시)
-    var lastError = null;
-    var lastTime = 0;
-    
-    for (var hash in ErrorAnalyzer.analyzedErrors) {
-      if (ErrorAnalyzer.analyzedErrors[hash] > lastTime) {
-        lastTime = ErrorAnalyzer.analyzedErrors[hash];
-      }
-    }
-    
-    if (!lastTime) {
-      console.log("❌ 분석할 에러가 없습니다.");
-      return;
-    }
-    
-    console.log("💡 마지막 에러에 대한 AI 상세 분석을 시작합니다...");
-    console.log("(힌트가 충분하다면 이 기능은 필요하지 않을 수 있습니다)");
-  };
-
   global.chatHelp = function() {
-    console.log("%c=== AI Assistant 도움말 ===", 
-                "color: #2196F3; font-weight: bold; font-size: 16px");
+    console.log("%c=== AI Assistant 도움말 ===", "color: #2196F3; font-weight: bold; font-size: 16px");
     console.log("");
     console.log("%c✓ 자동 에러 분석", "color: #FF9800; font-weight: bold");
-    console.log("  JavaScript 에러가 발생하면 자동으로 힌트를 표시합니다.");
-    console.log("  (AI 상세 분석은 힌트가 없는 경우에만 실행)");
+    console.log("  JavaScript 에러 발생 시 자동으로 분석합니다.");
     console.log("");
     console.log("%c✓ AI 채팅 명령어", "color: #FF9800; font-weight: bold");
-    console.log("  chat('메시지')           - AI에게 질문");
-    console.log("  chatJS('메시지')         - JavaScript 코드 전용 (강력 추천!)");
-    console.log("  chatHistory()            - 대화 이력 확인");
-    console.log("  clearChat()              - 대화 초기화");
-    console.log("  chatConfig({...})        - 설정 변경");
-    console.log("  chatSystem('프롬프트')   - 시스템 역할 설정");
-    console.log("  switchModel()            - 모델 목록 보기");
-    console.log("  switchModel('모델키')    - 모델 변경");
-    console.log("");
-    console.log("%c✓ 에러 분석 명령어", "color: #FF9800; font-weight: bold");
-    console.log("  analyzeError()           - 에러 분석 도움말");
-    console.log("");
-    console.log("%c💡 JavaScript 질문은 chatJS() 사용 권장", "color: #FF9800; font-weight: bold");
-    console.log("");
-    console.log("%c사용 예시:", "color: #4CAF50; font-weight: bold");
-    console.log("  chatJS('배열 정렬 방법')  ← JavaScript 코드로 답변");
-    console.log("  chatJS('Promise 사용법')");
-    console.log("  chatJS('화살표 함수 예제')");
-    console.log("");
-    console.log("  switchModel()            ← 사용 가능한 모델 보기");
-    console.log("  switchModel('qwen-3b')   ← 더 큰 모델로 변경");
+    console.log("  chat('메시지')     - AI에게 질문");
+    console.log("  clearChat()        - 대화 초기화");
+    console.log("  chatHelp()         - 도움말");
     console.log("");
   };
 
   // ============================================================
-  // 에러 후킹 설치
+  // 에러 후킹
   // ============================================================
   var originalOnError = window.onerror;
   var aiErrorHandler;
@@ -867,8 +680,8 @@
     }
   }
 
-  // console.error 후킹
   var originalConsoleError = console.error;
+  var originalConsoleWarn = console.warn;
   
   function isErrorMessage(message) {
     if (!message) return false;
@@ -954,9 +767,6 @@
     }
   };
 
-  // console.warn 후킹
-  var originalConsoleWarn = console.warn;
-  
   console.warn = function() {
     var args = Array.prototype.slice.call(arguments);
     originalConsoleWarn.apply(console, args);
@@ -1001,7 +811,6 @@
     }
   };
 
-  // unhandledrejection 이벤트
   window.addEventListener("unhandledrejection", function (event) {
     var error = event.reason;
     var errObj;
@@ -1025,7 +834,6 @@
     ErrorAnalyzer.handleError(errObj);
   });
 
-  // window.onerror 보호
   try {
     Object.defineProperty(window, 'onerror', {
       get: function() {
@@ -1043,7 +851,6 @@
     // 무시
   }
 
-  // 주기적으로 에러 핸들러 확인
   var checkInterval = setInterval(function() {
     if (window.onerror !== aiErrorHandler) {
       installErrorHandler();
