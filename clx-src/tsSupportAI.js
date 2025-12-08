@@ -1,10 +1,11 @@
 /**
- * 통합 AI Assistant - 에러 자동 분석 + 콘솔 채팅
+ * 통합 AI Assistant - 에러 자동 분석 + 콘솔 채팅 + API 검색
  * 
  * 주요 기능:
  * 1. 자동 에러 감지 및 AI 분석
  * 2. 콘솔에서 AI와 자유롭게 대화
  * 3. 확장된 에러 힌트 데이터베이스
+ * 4. eXBuilder6 API 검색 도우미 (Web-LLM 기반)
  */
 
 (function (global) {
@@ -36,6 +37,12 @@
     chatSettings: {
       temperature: 0.3,
       max_tokens: 800,
+      top_p: 0.85
+    },
+    
+    apiSearchSettings: {
+      temperature: 0.2,
+      max_tokens: 1000,
       top_p: 0.85
     }
   };
@@ -136,6 +143,309 @@
   };
 
   // ============================================================
+  // API 데이터베이스 관리자
+  // ============================================================
+  var APIDatabase = {
+    data: [],
+    loaded: false,
+    summaryContext: "",
+    
+    // 한글-영어 컨트롤 매핑 (확장)
+    controlNameMapping: {
+      // 원본 매핑
+      '인풋박스': 'inputbox',
+      '입력박스': 'inputbox',
+      '콤보박스': 'combobox',
+      '리스트박스': 'listbox',
+      '버튼': 'button',
+      '그리드': 'grid',
+      '캘린더': 'calendar',
+      '데이트인풋': 'dateinput',
+      '체크박스': 'checkbox',
+      '라디오버튼': 'radiobutton',
+      '텍스트에리어': 'textarea',
+      
+      // 확장 매핑 (요구사항 반영)
+      '스니펫': 'htmlsnippet',
+      'mdi': 'mdifolder',
+      '그룹': 'group',
+      '넘버에디터': 'numbereditor',
+      '내비게이션바': 'navigationbar',
+      '내비게이션': 'navigationbar',
+      '라디오': 'radiobutton',
+      '리스트': 'listbox',
+      '링크드리스트박스': 'linkedlistbox',
+      '링크드콤보박스': 'linkedcombobox',
+      '마스크에디터': 'maskeditor',
+      '메뉴': 'menu',
+      '비디오': 'video',
+      '사이드내비게이션': 'sidenavigation',
+      '서치인풋': 'searchinput',
+      '쉘': 'shell',
+      '슬라이더': 'slider',
+      '아웃풋': 'output',
+      '아코디언': 'accordion',
+      '알림': 'notification',
+      '오디오': 'audio',
+      '이미지': 'image',
+      '임베디드앱': 'embeddedapp',
+      '임베디드페이지': 'embeddedpage',
+      '체크박스그룹': 'checkboxgroup',
+      '탭폴더': 'tabfolder',
+      '트리': 'tree',
+      '파일업로더': 'fileupload',
+      '파일인풋': 'fileinput',
+      '페이지인덱서': 'pageindexer',
+      '페이지': 'pageindexer',
+      '프로그레스': 'progress',
+      '트리셀': 'treecell',
+      
+      // API 관련 용어
+      '속성': 'property',
+      '함수': 'api',
+      '메서드': 'api',
+      '이벤트': 'event',
+      '추가': 'add',
+      '아이템': 'item',
+      '추가방법': 'additem',
+      '아이템추가': 'additem'
+    },
+    
+    // API 데이터 로드
+    loadData: function(jsonData) {
+      if (Array.isArray(jsonData)) {
+        this.data = jsonData.filter(function(item) {
+          return item.USE_YN === 'Y';
+        });
+        this.loaded = true;
+        this.buildSummaryContext();
+        console.log("[API Search] ✓ API 데이터 로드 완료: " + this.data.length + "개");
+        return true;
+      }
+      console.error("[API Search] ❌ 잘못된 데이터 형식");
+      return false;
+    },
+    
+    // 전체 API 요약 컨텍스트 생성 (Web-LLM이 이해할 수 있는 형태) - 간결 버전
+    buildSummaryContext: function() {
+      var controlGroups = {};
+      
+      // 컨트롤별로 그룹화
+      for (var i = 0; i < this.data.length; i++) {
+        var item = this.data[i];
+        var ctrl = item.CTRL_RCD;
+        
+        if (!controlGroups[ctrl]) {
+          controlGroups[ctrl] = {
+            apis: [],
+            properties: []
+          };
+        }
+        
+        var info = {
+          name: item.PRO_NM_RCD,
+          type: item.CAT_RCD
+        };
+        
+        if (item.CAT_RCD === 'API') {
+          controlGroups[ctrl].apis.push(info.name);
+        } else {
+          controlGroups[ctrl].properties.push(info.name);
+        }
+      }
+      
+      // 매우 간결한 요약 컨텍스트 생성 (토큰 절약)
+      var summary = "eXBuilder6 컨트롤 목록:\n";
+      var controlList = [];
+      
+      for (var control in controlGroups) {
+        controlList.push(control);
+      }
+      
+      summary += controlList.join(", ") + "\n";
+      
+      this.summaryContext = summary;
+    },
+    
+    // 한글 키워드를 영어로 변환
+    translateKeywords: function(keywords) {
+      var translatedKeywords = [];
+      
+      for (var i = 0; i < keywords.length; i++) {
+        var keyword = keywords[i].toLowerCase();
+        translatedKeywords.push(keyword);
+        
+        // 직접 매핑 확인
+        if (this.controlNameMapping[keyword]) {
+          translatedKeywords.push(this.controlNameMapping[keyword]);
+        }
+        
+        // 부분 매핑 확인 (예: "콤보박스아이템" -> "combobox", "item")
+        for (var korKey in this.controlNameMapping) {
+          if (keyword.indexOf(korKey) !== -1) {
+            translatedKeywords.push(this.controlNameMapping[korKey]);
+          }
+        }
+      }
+      
+      return translatedKeywords;
+    },
+    
+    // 키워드로 관련 데이터 검색 (개선된 버전)
+    searchRelevantData: function(query) {
+      var keywords = query.toLowerCase().split(/\s+/);
+      
+      // 한글 키워드를 영어로 변환
+      var translatedKeywords = this.translateKeywords(keywords);
+      
+      var results = [];
+      
+      for (var i = 0; i < this.data.length; i++) {
+        var item = this.data[i];
+        var score = 0;
+        
+        var ctrlName = (item.CTRL_RCD || '').toLowerCase();
+        var apiName = (item.PRO_NM_RCD || '').toLowerCase();
+        var category = (item.CAT_RCD || '').toLowerCase();
+        var explanation = (item.EXPL || '').toLowerCase();
+        
+        for (var j = 0; j < translatedKeywords.length; j++) {
+          var keyword = translatedKeywords[j];
+          
+          // 정확히 일치하는 경우 매우 높은 점수
+          if (apiName === keyword) {
+            score += 200;
+          }
+          if (ctrlName === keyword) {
+            score += 150;
+          }
+          
+          // API 이름에 키워드 포함 (높은 우선순위)
+          if (apiName.indexOf(keyword) !== -1) {
+            score += 100;
+          }
+          
+          // 컨트롤 이름에 키워드 포함
+          if (ctrlName.indexOf(keyword) !== -1) {
+            score += 80;
+          }
+          
+          // 카테고리 매칭
+          if (category.indexOf(keyword) !== -1) {
+            score += 50;
+          }
+          
+          // 설명에 키워드 포함
+          if (explanation.indexOf(keyword) !== -1) {
+            score += 10;
+          }
+        }
+        
+        // 특정 조합 보너스 점수
+        // 예: "콤보박스" + "추가" + "아이템" 조합
+        var hasControl = false;
+        var hasAction = false;
+        var hasTarget = false;
+        
+        for (var k = 0; k < translatedKeywords.length; k++) {
+          var kw = translatedKeywords[k];
+          if (ctrlName.indexOf(kw) !== -1) hasControl = true;
+          if (kw === 'add' || kw === 'additem' || kw === '추가') hasAction = true;
+          if (kw === 'item' || kw === 'additem' || kw === '아이템') hasTarget = true;
+        }
+        
+        if (hasControl && hasAction && hasTarget && apiName.indexOf('additem') !== -1) {
+          score += 300; // 매우 높은 보너스
+        }
+        
+        if (score > 0) {
+          results.push({
+            item: item,
+            score: score
+          });
+        }
+      }
+      
+      // 점수순으로 정렬
+      results.sort(function(a, b) {
+        return b.score - a.score;
+      });
+      
+      // 디버그 로그 (개발 중에만 사용)
+      if (results.length > 0) {
+        console.log("[API Search] 검색 결과 상위 3개:");
+        for (var idx = 0; idx < Math.min(3, results.length); idx++) {
+          console.log("  " + (idx+1) + ". " + results[idx].item.CTRL_RCD + "." + 
+                     results[idx].item.PRO_NM_RCD + " (점수: " + results[idx].score + ")");
+        }
+      }
+      
+      // 상위 10개로 증가 (더 많은 정보 제공)
+      return results.slice(0, 10).map(function(r) { return r.item; });
+    },
+    
+    // 검색 결과를 상세 컨텍스트로 변환 (간결 버전)
+    buildDetailedContext: function(results) {
+      if (results.length === 0) {
+        return "검색 결과가 없습니다.";
+      }
+      
+      var context = "";
+      
+      for (var i = 0; i < results.length; i++) {
+        var item = results[i];
+        context += "【" + item.CTRL_RCD + "." + item.PRO_NM_RCD + "】\n";
+        context += "타입: " + item.CAT_RCD + "\n";
+        
+        // 설명을 200자로 제한
+        var explanation = (item.EXPL || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+        if (explanation.length > 200) {
+          explanation = explanation.substring(0, 200) + "...";
+        }
+        context += "설명: " + explanation + "\n";
+        
+        // 파라미터 정보 간결화
+        if (item.INPUT_VAL) {
+          var params = item.INPUT_VAL.replace(/\n/g, ' | ').trim();
+          if (params.length > 120) {
+            params = params.substring(0, 120) + "...";
+          }
+          context += "파라미터: " + params + "\n";
+        }
+        
+        if (item.RTRN_TY) {
+          context += "반환: " + item.RTRN_TY + "\n";
+        }
+        
+        context += "\n";
+      }
+      
+      return context;
+    },
+    
+    getSystemPrompt: function() {
+      return "당신은 eXBuilder6 JavaScript 프레임워크 전문가입니다.\n\n" +
+             "중요 규칙:\n" +
+             "1. eXBuilder6는 JavaScript 기반 프론트엔드 프레임워크입니다 (Java 아님!)\n" +
+             "2. 제공된 API 정보를 바탕으로 사용법을 설명하세요\n" +
+             "3. 모든 코드 예제는 JavaScript로 작성하세요\n" +
+             "4. 컨트롤 접근: app.lookup('컨트롤ID')\n" +
+             "5. 간결하고 실용적으로 답변하세요\n" +
+             "6. 한국어로 답변하세요\n\n" +
+             "답변 형식:\n" +
+             "- API 설명 (1-2줄)\n" +
+             "- JavaScript 코드 예제\n" +
+             "- 주의사항 (있는 경우)\n\n" +
+             "예시:\n" +
+             "ComboBox의 addItem은 콤보박스에 아이템을 추가합니다.\n" +
+             "```javascript\n" +
+             "var combo = app.lookup('cmbTest');\n" +
+             "combo.addItem(new cpr.controls.Item('표시값', '실제값'));\n" +
+             "```";
+    }
+  };
+
+  // ============================================================
   // 통합 AI Engine Manager
   // ============================================================
   var AIEngine = {
@@ -219,6 +529,7 @@
         console.log("%c기능:", "color: #2196F3; font-weight: bold");
         console.log("  ✓ 자동 에러 분석 (백그라운드)");
         console.log("  ✓ AI 채팅: chat('질문')");
+        console.log("  ✓ API 검색: search('검색어')");
         console.log("  ✓ 도움말: chatHelp()");
         
         if (ErrorAnalyzer.errorQueue.length > 0) {
@@ -532,6 +843,97 @@
   };
 
   // ============================================================
+  // API 검색 모듈 (Web-LLM 기반)
+  // ============================================================
+  var APISearchManager = {
+    searching: false,
+    
+    search: function(query) {
+      var self = this;
+      
+      if (!APIDatabase.loaded) {
+        console.error("[API Search] ❌ API 데이터가 로드되지 않았습니다.");
+        console.log("%c💡 사용법:", "color: #FF9800; font-weight: bold");
+        console.log("  loadAPI([...jsonData]) - JSON 배열 형태로 데이터 로드");
+        return;
+      }
+      
+      if (!AIEngine.ready || !AIEngine.engine) {
+        console.log("[API Search] ⏳ AI 엔진 초기화 중...");
+        AIEngine.init(function(err) {
+          if (!err) {
+            self.search(query);
+          }
+        });
+        return;
+      }
+      
+      if (this.searching) {
+        console.log("[API Search] ⏳ 검색 중입니다...");
+        return;
+      }
+      
+      this.searching = true;
+      
+      console.log("%c[API Search] 🔍 검색 중: " + query, "color:#9C27B0; font-weight:bold");
+      console.log("%c[AI] 생각하는 중...", "color: #9E9E9E; font-style: italic");
+      
+      var startTime = Date.now();
+      
+      // 관련 데이터 검색
+      var relevantData = APIDatabase.searchRelevantData(query);
+      
+      if (relevantData.length === 0) {
+        console.log("%c[API Search] ℹ️ 검색 결과가 없습니다.", "color:#FF9800");
+        this.searching = false;
+        return;
+      }
+      
+      var detailedContext = APIDatabase.buildDetailedContext(relevantData);
+      
+      // Web-LLM에게 질문 (명확한 프롬프트)
+      var userPrompt = "질문: " + query + "\n\n" +
+                       "=== 관련 API 정보 ===\n" + 
+                       detailedContext + "\n" +
+                       "=== 답변 요청 ===\n" +
+                       "위 API 정보를 바탕으로 JavaScript 코드 예제와 함께 설명해주세요.\n" +
+                       "반드시 JavaScript로 작성하고, app.lookup()을 사용하세요.";
+      
+      AIEngine.engine.chat.completions.create({
+        messages: [
+          {
+            role: "system",
+            content: APIDatabase.getSystemPrompt()
+          },
+          {
+            role: "user",
+            content: userPrompt
+          }
+        ],
+        temperature: CONFIG.apiSearchSettings.temperature,
+        max_tokens: CONFIG.apiSearchSettings.max_tokens,
+        top_p: CONFIG.apiSearchSettings.top_p
+      }).then(function(res) {
+        self.searching = false;
+        var content = res.choices[0].message.content;
+        var elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+        
+        console.log("%c" + "=".repeat(70), "color:#9C27B0; font-weight:bold");
+        console.log("%c🤖 AI API 검색 결과", "color:#ffffff; background:#9C27B0; font-weight:bold; font-size:14px; padding:5px");
+        console.log("%c" + "=".repeat(70), "color:#9C27B0; font-weight:bold");
+        console.log("");
+        console.log(content);
+        console.log("");
+        console.log("%c⏱️ 응답 시간: " + elapsedTime + "초", "color: #9E9E9E; font-size: 11px");
+        console.log("%c" + "=".repeat(70), "color:#9C27B0; font-weight:bold");
+      }).catch(function(err) {
+        self.searching = false;
+        console.error("[API Search] ❌ AI 분석 오류:", err);
+      });
+    }
+  };
+
+  // ============================================================
   // 채팅 모듈
   // ============================================================
   var ChatManager = {
@@ -601,6 +1003,32 @@
   // ============================================================
   // 글로벌 함수 노출
   // ============================================================
+  
+  // API 데이터 로드
+  global.loadAPI = function(jsonData) {
+    if (APIDatabase.loadData(jsonData)) {
+      console.log("%c[API Search] ✅ API 데이터베이스 준비 완료!", "color: #4CAF50; font-weight: bold");
+      console.log("%c💡 사용 예시:", "color: #2196F3; font-weight: bold");
+      console.log("  search('콤보박스 아이템 추가방법')");
+      console.log("  search('InputBox에서 사용 가능한 속성')");
+      console.log("  search('setValue 사용법')");
+    }
+  };
+  
+  // API 검색 (Web-LLM이 직접 답변)
+  global.search = function(query) {
+    if (typeof query !== 'string' || query.trim() === '') {
+      console.error("[API Search] ❌ 검색어를 입력해주세요.");
+      console.log("%c사용 예시:", "color: #2196F3; font-weight: bold");
+      console.log("  search('콤보박스 아이템 추가')");
+      console.log("  search('ComboBox 중복 에러 해결')");
+      return;
+    }
+    
+    APISearchManager.search(query);
+  };
+  
+  // AI 채팅
   global.chat = function(message) {
     if (typeof message !== 'string' || message.trim() === '') {
       console.error("[AI Assistant] ❌ 메시지를 입력해주세요. 예: chat('안녕하세요')");
@@ -632,10 +1060,23 @@
     console.log("%c✓ 자동 에러 분석", "color: #FF9800; font-weight: bold");
     console.log("  JavaScript 에러 발생 시 자동으로 분석합니다.");
     console.log("");
+    console.log("%c✓ API 검색 명령어 (Web-LLM 기반)", "color: #FF9800; font-weight: bold");
+    console.log("  loadAPI([...])          - API 데이터 로드");
+    console.log("  search('검색어')         - API 검색 (AI가 답변)");
+    console.log("");
+    console.log("%c  예시:", "color: #9E9E9E");
+    console.log("    search('콤보박스 아이템 추가방법')");
+    console.log("    search('InputBox에서 사용 가능한 속성')");
+    console.log("    search('setValue와 getValue 차이')");
+    console.log("");
     console.log("%c✓ AI 채팅 명령어", "color: #FF9800; font-weight: bold");
-    console.log("  chat('메시지')     - AI에게 질문");
-    console.log("  clearChat()        - 대화 초기화");
-    console.log("  chatHelp()         - 도움말");
+    console.log("  chat('메시지')          - AI에게 일반 질문");
+    console.log("  clearChat()             - 대화 초기화");
+    console.log("  chatHelp()              - 도움말");
+    console.log("");
+    console.log("%c  예시:", "color: #9E9E9E");
+    console.log("    chat('JavaScript 배열 정렬 방법')");
+    console.log("    chat('async/await 사용법')");
     console.log("");
   };
 
@@ -864,6 +1305,51 @@
   });
 
   // ============================================================
+  // API 데이터 자동 로드
+  // ============================================================
+  function loadAPIDataFromFile() {
+    var dataPath = "../ui/web-llm/data.json";
+    
+    fetch(dataPath)
+      .then(function(response) {
+        if (!response.ok) {
+          throw new Error("data.json 로드 실패: HTTP " + response.status);
+        }
+        return response.text();
+      })
+      .then(function(text) {
+        try {
+          var jsonData = JSON.parse(text);
+          
+          if (APIDatabase.loadData(jsonData)) {
+            console.log("%c[API Search] ✅ data.json 자동 로드 완료!", "color: #4CAF50; font-weight: bold");
+            console.log("💡 search('검색어') 명령어로 API를 검색하세요!");
+          }
+        } catch (parseError) {
+          console.error("[API Search] ❌ JSON 파싱 실패:", parseError.message);
+          console.log("%c[API Search] data.json 파일 형식 확인이 필요합니다:", "color: #FF9800; font-weight: bold");
+          console.log("1. 파일이 유효한 JSON 배열인지 확인");
+          console.log("2. 주석이나 trailing comma가 없는지 확인");
+          console.log("3. 파일 인코딩이 UTF-8인지 확인");
+          console.log("");
+          console.log("파일 내용 미리보기 (첫 200자):");
+          console.log(text.substring(0, 200));
+          console.log("");
+          console.log("%c💡 해결 방법:", "color: #2196F3; font-weight: bold");
+          console.log("• JSON 유효성 검사: https://jsonlint.com");
+          console.log("• 수동 로드: loadAPI([...jsonData])");
+        }
+      })
+      .catch(function(err) {
+        console.warn("[API Search] ⚠️ data.json 로드 실패:", err.message);
+        console.log("%c💡 해결 방법:", "color: #2196F3; font-weight: bold");
+        console.log("1. 파일 경로 확인: ../ui/web-llm/data.json");
+        console.log("2. 파일 존재 여부 확인");
+        console.log("3. 수동 로드: loadAPI([...jsonData])");
+      });
+  }
+
+  // ============================================================
   // 자동 초기화
   // ============================================================
   
@@ -871,6 +1357,9 @@
   console.log("💡 chatHelp() 명령어로 사용법을 확인하세요!");
   
   installErrorHandler();
+  
+  // API 데이터 자동 로드 시작
+  loadAPIDataFromFile();
   
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", function () {
@@ -892,5 +1381,7 @@
   global.AIEngine = AIEngine;
   global.ErrorAnalyzer = ErrorAnalyzer;
   global.ChatManager = ChatManager;
+  global.APIDatabase = APIDatabase;
+  global.APISearchManager = APISearchManager;
 
 })(window);
