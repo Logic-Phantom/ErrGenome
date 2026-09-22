@@ -11,13 +11,17 @@
 - [WebLLM 설정](#webllm-설정)
 - [문제 해결](#문제-해결)
 - [프로젝트 구조](#프로젝트-구조)
+- [작업 이력](#-작업-이력-changelog)
 
 ## 🎯 주요 기능
 
 ### 1. 자동 에러 캡처
-- **window.onerror**: 모든 JavaScript 에러를 자동으로 캡처
-- **unhandledrejection**: Promise rejection 자동 캡처
-- 에러 정보 자동 수집 (메시지, 파일명, 줄 번호, 스택 트레이스)
+- **eXBuilder6 `Platform.INSTANCE.onerror`**: 컨트롤 이벤트 핸들러, 서브미션, 익스프레션 에러 캡처
+  (런타임이 이런 에러를 직접 처리한 뒤 `console.log`로만 출력하기 때문에 이 훅이 꼭 필요합니다)
+- **window error / unhandledrejection**: 전역 에러와 Promise 거부 캡처
+- **console.error / console.warn**: 에러 형태의 로그 캡처
+- 여러 경로로 동시에 들어온 같은 에러는 한 번만 분석하고, 반복되는 에러는 다시 분석하지 않습니다
+- 스택 트레이스에서 **사용자 코드 위치를 찾아 실제 소스 코드(에러 줄 ±3줄)를 AI에게 함께 전달**합니다
 
 ### 2. 수동 에러 분석
 - `AISupport.analyze(error)` - 원하는 에러만 분석
@@ -206,42 +210,51 @@ AISupport.analyze({
 
 ### 모델 변경
 
-`tsSupportAI.js` 파일 내에서 모델을 변경할 수 있습니다:
+기본 모델은 **Qwen3-4B**(권장)입니다. GPU가 `shader-f16`을 지원하면 더 작고 빠른 q4f16 버전을, 지원하지 않으면 q4f32 버전을 자동으로 고릅니다.
+로드에 실패하면(GPU 메모리 부족 등) **`qwen3-1.7b` → `qwen3-0.6b` 순서로 자동 다운그레이드**합니다.
+
+브라우저 콘솔에서 바꿀 수 있고, 선택한 모델은 브라우저에 저장됩니다:
 
 ```javascript
-// 모델 설정 변경
-var modelName = "Qwen2.5-0.5B-Instruct-q4f32_1-MLC";  // 현재 사용 중 (가장 작음)
-// 또는
-var modelName = "Phi-3-mini-4k-instruct-q4f32_1-MLC";  // 더 정확함
-// 또는
-var modelName = "TinyLlama-1.1B-Chat-v1.0-q4f32_1-MLC";  // 중간 크기
+AISupport.models();                      // 모델 목록
+AISupport.setModel('qwen3-1.7b');        // 모델 교체 (즉시 적용, 다음 방문에도 유지)
+AISupport.resetModel();                  // 기본값으로 (새로고침 후 적용)
+AISupport.deleteModelCache('qwen2.5-0.5b'); // 더 이상 안 쓰는 모델 파일 삭제 (디스크 확보)
+AISupport.status();                      // 현재 모델, 실행 모드(Web Worker/메인), 대기열 등
 ```
 
-### 지원되는 모델 목록
+| 키 | 설명 |
+|---|---|
+| `qwen3-0.6b` | 가장 가벼움 (VRAM 약 1.4GB) |
+| `qwen3-1.7b` | 경량, 저사양 PC 용 (약 2GB) |
+| `qwen3-4b` | **기본값(권장)**, 한국어/코드 품질 (약 3.4GB, 첫 다운로드 약 2GB) |
+| `qwen3-8b` | 최고 품질, 고사양 GPU (약 5.7GB) |
+| `qwen2.5-coder-3b` | 코드 특화 (약 2.5GB) |
+| `qwen2.5-1.5b`, `qwen2.5-0.5b`, `llama-3.2-3b` | 이전 세대 모델 |
 
-전체 모델 목록: https://mlc.ai/models
-
-**추천 작은 모델 (빠른 로딩):**
-1. `Qwen2.5-0.5B-Instruct-q4f32_1-MLC` ✅ (현재 사용, 가장 작음)
-2. `TinyLlama-1.1B-Chat-v1.0-q4f32_1-MLC` (약 1.1B)
-3. `Phi-3-mini-4k-instruct-q4f32_1-MLC` (약 3.8B, 더 정확)
-
-**중간 크기 모델:**
-- `Qwen2.5-1.5B-Instruct-q4f32_1-MLC`
-- `Phi-3-mini-128k-instruct-q4f32_1-MLC`
-
-**큰 모델 (더 정확하지만 느림):**
-- `Llama-3.1-8B-Instruct-q4f32_1-MLC` (원래 사용하던 모델)
+프로젝트 전체의 기본값은 `tsSupportAI.js`를 로드하기 전에 지정합니다: `window.AI_ASSISTANT_CONFIG = { model: 'qwen3-1.7b' }`
+(WebLLM의 model_id를 직접 쓰려면 `modelId: 'Qwen2.5-7B-Instruct-q4f16_1-MLC'`)
 
 ### 경로 설정
 
-`tsSupportAI.js` 파일 내에서 WebLLM 경로를 변경할 수 있습니다:
+WebLLM 경로는 `tsSupportAI.js` **자신의 위치를 기준으로 자동 계산**됩니다 (`<tsSupportAI.js 폴더>/web-llm/web-llm.min.js`).
+따라서 `/ui/` 등 배포 경로가 달라져도 별도 수정이 필요 없습니다. 로드 순서는 다음과 같습니다:
+
+1. `window.AI_ASSISTANT_CONFIG.webllmURL` (지정한 경우)
+2. `<tsSupportAI.js 폴더>/web-llm/web-llm.min.js`
+3. CDN `https://esm.run/@mlc-ai/web-llm` (폐쇄망이면 `webllmCDN: null`)
+
+다른 위치를 쓰려면 `tsSupportAI.js` 로드 **전에** 설정합니다:
 
 ```javascript
-// WebLLM 파일 경로 변경
-var WebLLM_URL = "/web-llm/web-llm.min.js";
-var WebLLM_WORKER_URL = "/web-llm/worker.js";
+window.AI_ASSISTANT_CONFIG = {
+    webllmURL: "/my-path/web-llm.min.js",  // 스크립트 기준 상대경로 또는 절대경로
+    useWebWorker: true                      // false 면 메인 스레드에서 추론
+};
 ```
+
+모델 추론은 기본적으로 `web-llm/worker.js`(ES Module Worker)에서 실행되어 화면이 멈추지 않으며,
+워커 생성이 실패하면 자동으로 메인 스레드 방식으로 전환됩니다.
 
 ## 🔍 분석 결과 확인
 
@@ -375,10 +388,8 @@ Service Worker가 Cache API를 방해할 수 있습니다:
 **문제:** 모델 다운로드 중 오류 발생
 
 **해결 방법:**
-1. 더 작은 모델 사용 (권장)
-   - `Qwen2.5-0.5B-Instruct-q4f32_1-MLC` (현재 사용 중)
-   - `TinyLlama-1.1B-Chat-v1.0-q4f32_1-MLC`
-   - `Phi-3-mini-4k-instruct-q4f32_1-MLC`
+1. 더 작은 모델 사용: `AISupport.setModel('qwen3-1.7b')` 또는 `AISupport.setModel('qwen3-0.6b')`
+   (GPU 메모리 부족이면 자동으로 작은 모델로 내려갑니다)
 
 2. 인터넷 연결 확인
    - HuggingFace 접근 가능 여부 확인
@@ -388,9 +399,10 @@ Service Worker가 Cache API를 방해할 수 있습니다:
    - 첫 로드 시 모델을 다운로드해야 하므로 시간이 걸릴 수 있습니다 (수 분)
    - 다운로드된 모델은 브라우저 캐시에 저장되어 다음 로드는 더 빠릅니다
    - 모델 크기에 따라 다운로드 시간이 달라집니다:
-     - 0.5B 모델: 약 300MB
-     - 1.5B 모델: 약 900MB
-     - 8B 모델: 약 4-5GB
+     - Qwen3-0.6B: 약 0.5GB
+     - Qwen3-1.7B: 약 1GB
+     - Qwen3-4B (기본값): 약 2GB
+     - Qwen3-8B: 약 4-5GB
 
 ### 에러 캡처 문제
 
@@ -421,8 +433,8 @@ function onBtn1Click(e){
     try {
         var arr = new Array(-1); // 음수 길이 배열
     } catch(err) {
-        // 에러를 직접 분석 요청
-        if (window.AISupport && window.AISupport.ready) {
+        // 에러를 직접 분석 요청 (엔진 로딩 중이면 대기열에 들어갔다가 준비되면 분석)
+        if (window.AISupport) {
             console.log("[테스트] 에러를 AI로 분석 요청...");
             window.AISupport.analyze(err);
         }
@@ -525,20 +537,72 @@ eXWeb-LLM/
 
 ## 🔧 설정 변경
 
-`tsSupportAI.js` 파일 내에서 다음 설정을 변경할 수 있습니다:
+`tsSupportAI.js`를 수정하지 않고, 로드하기 **전에** `window.AI_ASSISTANT_CONFIG`로 원하는 항목만 덮어씁니다
+(전체 항목은 `tsSupportAI.js` 상단의 `CONFIG` 참고):
 
 ```javascript
-// WebLLM 파일 경로 변경
-var WebLLM_URL = "/web-llm/web-llm.min.js";
-var WebLLM_WORKER_URL = "/web-llm/worker.js";
-
-// 모델 설정 변경
-var modelName = "Qwen2.5-0.5B-Instruct-q4f32_1-MLC";  // 사용할 모델
+window.AI_ASSISTANT_CONFIG = {
+    model: "qwen3-1.7b",          // 모델 프리셋 키
+    fallbackModels: ["qwen3-0.6b"], // 실패 시 시도할 모델
+    webllmURL: null,              // web-llm.min.js 경로 (기본: 스크립트 폴더/web-llm/)
+    webllmCDN: null,              // 폐쇄망이면 null (CDN 폴백 끔)
+    useWebWorker: true,           // Web Worker 에서 추론
+    preload: true,                // 페이지가 한가할 때 모델 미리 로드 (false: 첫 에러/채팅 시 로드)
+    captureConsole: true,         // console.error/warn 도 수집
+    fetchSourceSnippet: true      // 에러 위치의 소스 코드를 AI 에게 전달
+};
 ```
 
 ## 📞 문의
 
 기술 지원 관련 문의사항이 있으면 개발팀에 문의하세요.
+
+## 📝 작업 이력 (Changelog)
+
+작업할 때마다 아래에 최신 항목을 위에 추가합니다.
+
+### 2026-09-22 (3차) 권장 모델 적용 · 리팩토링 · 최적화
+**모델**
+- 기본 모델 `qwen3-1.7b` → **`qwen3-4b`** (권장). 폴백 체인 `qwen3-4b → qwen3-1.7b → qwen3-0.6b` 자동 다운그레이드
+- `AISupport.deleteModelCache('키')` 추가: 안 쓰는 모델 파일을 브라우저 저장소에서 삭제
+
+**최적화**
+- 엔진 요청 직렬화: 에러 분석·채팅·API 검색이 동시에 호출돼도 한 번에 하나씩 순서대로 실행 (동시 호출 충돌 방지)
+- 모델 사전 로드를 `window.load` 이후 `requestIdleCallback`(브라우저가 한가할 때)으로 미룸 → eXBuilder 앱 초기 화면 로딩과 경쟁하지 않음
+- 에러 기록(중복 판별·분석 결과·반복 횟수)을 하나의 `BoundedMap`(최대 100개)으로 통합 → 장시간 사용 시 메모리 증가 방지
+- 소스 코드 캐시도 최대 30개 파일로 제한
+- `console.log` 후킹 비용 최소화: 평소에는 인자만 보관하고 에러가 났을 때만 문자열로 변환
+- API 검색 데이터는 로드할 때 검색용 소문자 필드를 미리 계산 (검색할 때마다 `toLowerCase` 반복 제거)
+- 프롬프트 길이 상한(`maxPromptChars`)으로 모델 입력 한도(4K 토큰) 보호
+
+**리팩토링**
+- 초기화 흐름을 `loadLibrary → loadFirstModel → onReady` 단계로 분리하고, "준비되면 실행" 로직을 `AIEngine.whenReady()`로 통일 (chat/search 중복 코드 제거)
+- 콘솔 출력은 `Log.block()`(그룹), `Log.elapsed()`(소요 시간), `STYLE` 상수로 통일
+- 에러 정규화(`ErrorCollector.capture`)가 모든 수집 경로의 단일 입구가 되도록 정리
+- 기존 전역 API(`chat`, `search`, `loadAPI`, `AIEngine`, `ErrorAnalyzer`, `ErrorAnalyzer.errorQueue`, `APIDatabase.getSystemPrompt` 등)는 호환 유지
+
+### 2026-09-22 (2차) 에러 분석이 동작하지 않던 문제 수정 · 기능 개선
+**원인**: eXBuilder6 런타임은 컨트롤 이벤트 핸들러 안의 에러를 직접 처리한 뒤 `console.error`가 아닌
+`console.log("%c...", "color: red;")`로 출력한다 (콘솔의 `try-catch.ts:206` 로그). 기존에는 `console.error`만 가로채서 이 에러를 받지 못했다.
+- 런타임 공식 전역 에러 훅 `cpr.core.Platform.INSTANCE.onerror`를 1차 수집 경로로 사용 (이벤트 핸들러·서브미션·익스프레션·Promise). 앱이 나중에 `onerror`를 지정해도 체이닝으로 유지
+- `window.onerror` 강제 덮어쓰기 + 1초 주기 재설치 코드 제거 → `addEventListener("error"/"unhandledrejection")`로 변경 (런타임과 충돌 방지)
+- 기본 모델 `Qwen2.5-0.5B` → `Qwen3-1.7B`, GPU `shader-f16` 지원 여부에 따라 q4f16/q4f32 자동 선택, Qwen3의 `<think>` 추론 비활성화
+- 에러가 난 **사용자 코드 줄 앞뒤 3줄을 가져와 AI에게 전달** → 실제 코드를 근거로 한 수정안 제시
+- 소형 모델이 없는 API(`addOption` 등)를 만들어내지 않도록, 런타임에서 존재를 확인한 eXBuilder6 핵심 API 요약을 프롬프트에 포함
+- 같은 에러가 여러 경로로 들어오면 한 번만 분석, `setInterval` 등 반복 에러는 "반복 발생 (N회)" 한 줄로 요약
+- `AISupport.analyze()` / `models()` / `setModel()` / `status()` 추가 (`testExam.js`와 README가 쓰던 `AISupport.analyze`가 실제로는 없었음)
+- 채팅 이력은 최근 10개로 제한 (모델 입력 한도 보호)
+
+### 2026-09-22 (1차) "AI 모듈 로드 실패" 수정
+**원인**: WebLLM 경로가 `../ui/web-llm/web-llm.min.js`로 하드코딩되어 있어, 배포 경로가 `/ui/`가 아닌 환경
+(eXBuilder 스튜디오 미리보기 `/eXWeb-LLM/clx-src/...` 등)에서 404 → 모듈 로드 실패.
+- `tsSupportAI.js` 자신의 URL을 기준으로 절대 경로를 계산. 순서: `AI_ASSISTANT_CONFIG.webllmURL` → `스크립트 폴더/web-llm/web-llm.min.js` → CDN
+- `web-llm/worker.js`를 실제 동작하는 ES Module Worker로 교체 → 모델 추론을 Web Worker에서 실행해 화면이 멈추지 않음 (실패 시 메인 스레드로 자동 전환)
+- WebGPU 사전 확인 (미지원 브라우저에서 모델 다운로드 전에 안내)
+- 어시스턴트가 자기 자신의 실패 로그를 다시 에러로 분석하던 루프 제거
+- 분석 중에 들어온 에러가 버려지던 문제 → 대기열에 넣어 순차 분석
+- 초기화 중 `chat()`/`search()` 호출이 무시되던 문제 → 초기화 완료 후 이어서 실행
+- `data.json`(선택 사항)이 없을 때 경고 대신 안내 한 줄만 출력
 
 ---
 
