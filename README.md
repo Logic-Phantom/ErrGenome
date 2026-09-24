@@ -1,6 +1,7 @@
 # ErrGenome - AI Error Assistant 프로젝트
 
-브라우저에서 발생한 JavaScript 에러를 자동으로 캡처하여 WebLLM을 통해 분석하고, 원인과 해결방법을 콘솔에 출력하는 기술 지원용 라이브러리입니다.
+브라우저에서 발생한 JavaScript 에러를 자동으로 캡처하여 AI로 분석하고, 원인과 해결방법을 콘솔에 출력하는 기술 지원용 라이브러리입니다.
+기본은 **WebLLM**(브라우저 GPU에서 실행, 외부 전송 없음)이며, **Google Gemini API 무료 키**를 넣으면 모델 다운로드 없이 즉시·더 높은 품질로 분석합니다.
 
 ## 📋 목차
 
@@ -9,6 +10,7 @@
 - [설치 방법](#설치-방법)
 - [사용 방법](#사용-방법)
 - [WebLLM 설정](#webllm-설정)
+- [Gemini API 사용 (선택)](#️-gemini-api-사용-선택)
 - [문제 해결](#문제-해결)
 - [프로젝트 구조](#프로젝트-구조)
 - [작업 이력](#-작업-이력-changelog)
@@ -28,10 +30,9 @@
 - Error 객체, 문자열, 커스텀 객체 모두 지원
 
 ### 3. AI 기반 분석
-- WebLLM을 사용한 지능형 분석
-- 에러 원인, 발생 이유, 해결방법 제공
-- 기술 지원 엔지니어 관점의 설명
-- 한국어 답변
+- 에러 원인, 발생 이유, 해결방법(수정 전/후 코드), 개발자 체크리스트 제공
+- 기술 지원 엔지니어 관점의 설명, 한국어 답변
+- **제공자 선택**: WebLLM(기본, 브라우저 내 실행) 또는 Gemini API(키 설정 시 자동 전환, 실패 시 WebLLM 폴백)
 
 ### 4. 에러 큐잉 시스템
 - WebLLM 엔진 로딩 중 발생한 에러는 큐에 저장
@@ -256,6 +257,53 @@ window.AI_ASSISTANT_CONFIG = {
 모델 추론은 기본적으로 `web-llm/worker.js`(ES Module Worker)에서 실행되어 화면이 멈추지 않으며,
 워커 생성이 실패하면 자동으로 메인 스레드 방식으로 전환됩니다.
 
+## ☁️ Gemini API 사용 (선택)
+
+WebLLM은 첫 방문에 약 2GB 다운로드와 WebGPU가 필요하고, 4B 모델 기준 분석에 10~15초가 걸립니다.
+Google Gemini API는 **무료 티어**로 쓸 수 있고, 다운로드·GPU 없이 보통 2~5초 안에 훨씬 정확한 답을 줍니다.
+
+### 1. 키 발급 및 설정
+
+1. https://aistudio.google.com/apikey 에서 Google 계정으로 무료 키 발급 (결제 등록 불필요)
+2. 브라우저 콘솔에서 한 번만 실행 (이 브라우저의 localStorage 에 저장, 다음 방문에도 유지):
+
+```javascript
+AISupport.setGeminiKey('AIza...');   // 저장 즉시 이후 분석/채팅은 Gemini 사용
+AISupport.setGeminiKey(null);        // 삭제 → WebLLM 으로 복귀
+AISupport.status();                  // provider, 사용 모델, 키(마스킹) 확인
+```
+
+프로젝트 전체에 지정하려면 `tsSupportAI.js` 로드 전에 `window.AI_ASSISTANT_CONFIG = { gemini: { apiKey: '...' } }`
+(단, 소스에 넣은 키는 누구나 볼 수 있으므로 내부망/개발 환경에서만 권장).
+
+### 2. 동작 방식
+
+| 설정 | 동작 |
+|---|---|
+| `provider: "auto"` (기본) | Gemini 키가 있으면 Gemini, 없으면 WebLLM. Gemini 가 네트워크/할당량 오류로 실패하면 **WebLLM 으로 이어서 분석** |
+| `provider: "gemini"` | Gemini 만 사용 (키 없으면 오류 안내) |
+| `provider: "webllm"` | 키가 있어도 WebLLM 만 사용 (외부 전송 없음) |
+
+- Gemini 사용 중에는 WebLLM 모델을 미리 내려받지 않습니다 (폴백이 필요한 순간에만 로드).
+- 모델은 `gemini-3.8-flash` → 실패 시 `gemini-3.5-flash-lite` → `gemini-2.5-flash` 순서로 시도합니다.
+  무료 할당량(429)은 **모델별로 따로** 계산되므로 다음 모델로 넘어가면 대부분 바로 이어집니다.
+  모델 이름을 못 찾을 때(404)도 같은 방식으로 넘어갑니다.
+- 요청은 한 번에 하나씩 순서대로 보내 무료 티어의 분당 요청 제한을 보호합니다.
+- 결과 출력의 소요 시간 옆에 실제 응답한 모델이 표시됩니다 (예: `⏱️ 2.3초 · gemini-3.8-flash`).
+
+```javascript
+AISupport.setGeminiModel('gemini-2.5-flash'); // 모델 변경 (저장됨), null 이면 기본값
+AISupport.setProvider('webllm');             // 이번 세션만 제공자 강제
+```
+
+### 3. 주의사항
+
+- **무료 티어는 전송 내용이 Google 제품 개선에 사용될 수 있습니다.** 에러 메시지, 에러 위치의 소스 코드 조각(±3줄), 직전 콘솔 로그가 전송되므로
+  고객사 소스를 다루는 환경에서는 `provider: "webllm"` 으로 두거나 유료 티어 키를 사용하세요.
+- 브라우저에 저장된 키는 추출될 수 있습니다. Google Cloud 콘솔에서 키를 **Gemini API 전용 + HTTP 리퍼러(사이트) 제한**으로 묶어 두는 것을 권장합니다.
+- 무료 티어 한도(분당/일일 요청 수)는 모델마다 다르며 https://aistudio.google.com/rate-limit 에서 확인할 수 있습니다.
+- 폐쇄망에서는 Gemini 를 쓸 수 없으므로 키를 설정하지 않으면 기존과 똑같이 WebLLM 만 동작합니다.
+
 ## 🔍 분석 결과 확인
 
 ### 콘솔 확인 방법
@@ -268,41 +316,39 @@ window.AI_ASSISTANT_CONFIG = {
    - 개발자 도구가 열리면 상단의 **"Console"** 탭 클릭
 
 3. **분석 결과 확인**
-   - 에러 발생 후 약 5-10초 후 분석 결과가 콘솔에 출력됩니다
+   - 에러 발생 후 WebLLM(4B)은 약 10~15초, Gemini 는 약 2~5초 뒤에 분석 결과가 콘솔에 출력됩니다
 
 ### 출력 형식
 
-AI 분석 결과는 다음과 같은 형식으로 출력됩니다:
+에러가 잡히면 먼저 주황색 헤더(에러·발생 상황·위치)가, 이어서 초록색 접이식 그룹으로 분석 결과가 출력됩니다:
 
 ```
-======================================================================
-                    🤖 AI 에러 분석 결과                    
-======================================================================
+⚠️ SyntaxError: Unexpected token '}', ..." "value": }" is not valid JSON
+   발생 상황: 컨트롤 이벤트 핸들러 실행 중
+   위치: clx-src/testExam.js:188 (testJSONParseError)
+[AI Assistant] 🔍 AI 분석 중 (webllm): Unexpected token '}' ...
 
-1) 에러 원인
-RangeError: Invalid array length
+🤖 AI 에러 분석 결과 - SyntaxError
+  1. 에러 원인:
+  JSON 문자열에 값 누락으로 인해 JSON 파싱 오류 발생
 
-2) 왜 발생했는가
-배열의 길이로 음수(-1)를 지정하려고 했기 때문에 발생했습니다.
-배열 길이는 0 이상의 정수여야 합니다.
+  2. 왜 발생했나:
+  >> 188 줄에서 JSON 문자열에 "value": 뒤에 값이 없어 JSON 문법 오류
 
-3) 해결방법 (코드 예시 포함)
-음수 대신 올바른 배열 길이를 사용하세요:
-// 잘못된 예:
-var arr = new Array(-1);
+  3. 해결 방법:
+  // 수정 전
+  var badJSON = '{ "name": "test", "value": }';
+  // 수정 후
+  var badJSON = '{ "name": "test", "value": "test" }';
 
-// 올바른 예:
-var arr = new Array(10); // 10개 요소
-// 또는
-var arr = []; // 빈 배열
-
-4) 고객 안내 멘트
-이 오류는 개발 과정에서 발생한 것으로, 곧 수정될 예정입니다.
-
-======================================================================
-💡 팁: 브라우저 개발자 도구(F12) → Console 탭에서 이 메시지를 확인할 수 있습니다.
-======================================================================
+  4. 개발자 체크리스트:
+  • JSON 문자열의 모든 키 값이 올바르게 완성되었는지 확인
+  • JSON 구문 검증 도구 사용 (예: JSONLint)
+  • 서버 응답이 JSON 형식인지 확인 (HTML 에러 페이지가 아님)
+  ⏱️ 14.5초 · Qwen3-4B-q4f16_1-MLC
 ```
+
+같은 에러가 반복되면 결과를 다시 출력하지 않고 `♻️ 반복 발생 (N회)` 한 줄로 알립니다.
 
 ## 🛠️ 문제 해결
 
@@ -403,6 +449,18 @@ Service Worker가 Cache API를 방해할 수 있습니다:
      - Qwen3-1.7B: 약 1GB
      - Qwen3-4B (기본값): 약 2GB
      - Qwen3-8B: 약 4-5GB
+
+### Gemini API 오류
+
+콘솔의 `⚠️ Gemini 실패 (...)` 메시지로 원인을 구분합니다. `provider: "auto"` 면 실패해도 WebLLM 으로 이어서 분석합니다.
+
+| 메시지 | 원인 / 조치 |
+|---|---|
+| `API 키가 올바르지 않습니다` | 키 오타·삭제됨 → `AISupport.setGeminiKey('새 키')` |
+| `무료 할당량 초과 (429)` | 분당/일일 한도 → 자동으로 다음 모델 시도. 모두 초과면 잠시 후 재시도 |
+| `모델을 찾을 수 없음 (404)` | 모델 이름 변경/종료 → 다음 모델 자동 시도. `AISupport.setGeminiModel('...')` 로 교체 |
+| `네트워크 오류` | 인터넷/방화벽에서 `generativelanguage.googleapis.com` 차단 → 폐쇄망이면 WebLLM 사용 |
+| `빈 응답 (finish_reason: length)` | thinking 토큰이 출력 한도를 소진 → `gemini.maxTokens` 증가 또는 `reasoningEffort` 낮춤 |
 
 ### 에러 캡처 문제
 
@@ -542,8 +600,19 @@ eXWeb-LLM/
 
 ```javascript
 window.AI_ASSISTANT_CONFIG = {
-    model: "qwen3-1.7b",          // 모델 프리셋 키
+    provider: "auto",             // "auto" | "gemini" | "webllm"
+    gemini: {                     // 일부만 지정해도 나머지는 기본값 유지
+        apiKey: null,             // 보통은 콘솔에서 AISupport.setGeminiKey('...') 사용
+        model: "gemini-3.8-flash",
+        fallbackModels: ["gemini-3.5-flash-lite", "gemini-2.5-flash"],
+        reasoningEffort: "low",   // 낮을수록 빠름 (2.5: none~high, 3.x: minimal~high)
+        maxTokens: 4096,
+        timeoutMs: 45000,
+        fallbackToWebLLM: true    // auto 모드에서 Gemini 실패 시 WebLLM 으로 이어서 분석
+    },
+    model: "qwen3-1.7b",          // WebLLM 모델 프리셋 키
     fallbackModels: ["qwen3-0.6b"], // 실패 시 시도할 모델
+    requestTimeoutMs: 180000,     // WebLLM 한 요청 최대 대기 (초과 시 중단하고 다음 요청 진행)
     webllmURL: null,              // web-llm.min.js 경로 (기본: 스크립트 폴더/web-llm/)
     webllmCDN: null,              // 폐쇄망이면 null (CDN 폴백 끔)
     useWebWorker: true,           // Web Worker 에서 추론
@@ -560,6 +629,32 @@ window.AI_ASSISTANT_CONFIG = {
 ## 📝 작업 이력 (Changelog)
 
 작업할 때마다 아래에 최신 항목을 위에 추가합니다.
+
+### 2026-09-24 (4차) Gemini API 제공자 추가 · 자체 검토 결과 보강
+**검증 (eXBuilder 스튜디오 미리보기 + 앱 내 브라우저)**
+- 3차까지의 변경이 실제로 동작하는지 확인: `Platform.onerror` 훅 설치 → 버튼 클릭 에러 2건(수동 `analyze` + 런타임 이벤트 핸들러) 모두 캡처,
+  소스 위치(`testExam.js:178/188`) 특정, Qwen3-4B(Web Worker)로 각 12~14초 만에 분석 결과 출력. 재방문 시 캐시에서 약 15초 만에 준비
+- 런타임 소스로 훅 안전성 재확인: 런타임은 `onerror` 접근자가 아닌 내부 필드(`µqd`)를 직접 호출하므로 인스턴스에 접근자를 덮어써도 훅이 유지됨
+- WebLLM 0.2.80 이 `extra_body.enable_thinking` 을 실제로 읽는지, Qwen3 프리셋 8종이 번들에 있는지(컨텍스트 4K) 확인
+
+**Gemini API (무료 티어) 제공자**
+- `provider: "auto"`(기본): `AISupport.setGeminiKey('키')` 로 키를 넣으면 Gemini, 없으면 WebLLM. Gemini 실패(키·할당량·네트워크) 시 WebLLM 으로 이어서 분석
+- OpenAI 호환 엔드포인트 사용 → 기존 messages/system prompt 그대로 전송. 브라우저 직접 호출 가능 여부(CORS)를 실제 엔드포인트로 확인
+- 모델 폴백 `gemini-3.8-flash → gemini-3.5-flash-lite → gemini-2.5-flash` (404/429/5xx 만 다음 모델, 키 오류·네트워크 오류는 즉시 폴백)
+- `reasoning_effort: "low"`, `max_tokens: 4096` (thinking 토큰 포함), 45초 타임아웃, 요청 직렬화(무료 RPM 보호)
+- 결과의 소요 시간 옆에 실제 응답 모델 표시. `AISupport.status()` 에 provider/gemini/webllm 상태 분리
+- 첫 사용 시 "소스 조각이 Google 로 전송되며 무료 티어는 제품 개선에 사용될 수 있음" 안내 출력
+- 브라우저에서 검증: 실제 엔드포인트에 잘못된 키 → `API 키가 올바르지 않습니다` 안내 후 WebLLM 폴백 완료 /
+  모의 응답으로 429 → 다음 모델 재시도 → 결과 출력(`⏱️ · gemini-3.5-flash-lite`) / `chat()` 경로 / 키 삭제 시 WebLLM 복귀
+
+**자체 검토에서 찾은 문제 수정**
+- WebLLM 요청이 영원히 응답하지 않으면(GPU device lost 등) 직렬화 대기열과 `analyzing` 플래그가 영구히 막혀 이후 모든 에러가 분석되지 않던 문제 → `requestTimeoutMs`(기본 3분) 초과 시 `interruptGenerate()` 후 다음 요청 진행
+- `AISupport.setModel()` 교체 실패 시 교체 중 들어온 대기 콜백이 영원히 대기하던 문제 → 실패 전파(`flush(err)`)
+- 같은 메시지의 에러가 다른 줄에서 나면 "반복 발생"으로 묶여 분석되지 않던 문제 → 판별 키에 사용자 코드 위치(`파일:줄`) 포함
+- 페이지 로드마다 선택 파일 `data.json` 을 요청해 콘솔에 404 가 찍히던 문제 → 첫 `search()` 호출 때만 로드
+- `AISupport.analyze({message, type, code, details, context})` 에서 `type/code/details/context` 가 버려지던 문제 → 이름·메시지·발생 상황에 반영
+- `AI_ASSISTANT_CONFIG.gemini = { apiKey }` 처럼 객체 설정을 일부만 지정해도 나머지 기본값 유지 (깊은 병합)
+- Gemini OpenAI 호환 엔드포인트가 오류를 `[{error}]` 배열로 감싸는 경우 메시지 파싱
 
 ### 2026-09-22 (3차) 권장 모델 적용 · 리팩토링 · 최적화
 **모델**

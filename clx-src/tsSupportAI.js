@@ -1,11 +1,14 @@
 /**
- * 통합 AI Assistant - 에러 자동 분석 + 콘솔 채팅 + API 검색 (WebLLM 기반, 브라우저 내 실행)
+ * 통합 AI Assistant - 에러 자동 분석 + 콘솔 채팅 + API 검색
+ *   · 기본: WebLLM (브라우저 내 GPU 실행, 외부 전송 없음)
+ *   · 선택: Google Gemini API (무료 티어) - 키를 설정하면 다운로드 없이 즉시, 더 높은 품질로 분석
  *
  * 구성
  *  1. CONFIG            : 설정 (window.AI_ASSISTANT_CONFIG 로 덮어쓰기 가능)
  *  2. Util              : 로그/경로/스토리지/BoundedMap 유틸
  *  3. Models            : 모델 프리셋, GPU 에 맞는 변형 선택, 폴백 체인
  *  4. AIEngine          : WebLLM 로드, Web Worker 엔진 생성, 요청 직렬화, 모델 교체
+ *  4-1. Gemini / AI     : Gemini API 제공자, 제공자 선택(auto) 및 WebLLM 폴백 디스패처
  *  5. SourceInspector   : 스택에서 사용자 코드 위치를 찾아 실제 소스 코드 조각을 수집
  *  6. ErrorCollector    : 여러 경로의 에러를 하나의 형태(info)로 정규화
  *  7. ErrorAnalyzer     : 중복/반복 처리, 대기열, 프롬프트 구성, 결과 출력
@@ -48,6 +51,24 @@
     useWebWorker: true,
     // 모델 미리 로드: true = 페이지가 한가할 때(idle) 로드, false = 첫 에러/채팅 시점에 로드
     preload: true,
+    // WebLLM 한 요청의 최대 대기 시간 (GPU 멈춤 등으로 요청 하나가 대기열 전체를 막는 것 방지)
+    requestTimeoutMs: 180000,
+
+    // AI 제공자: "auto" = Gemini 키가 있으면 Gemini, 없으면 WebLLM / "gemini" / "webllm"
+    provider: "auto",
+    // Google Gemini API (https://aistudio.google.com/apikey 에서 무료 키 발급)
+    // 키는 AISupport.setGeminiKey('키') 로 브라우저에 저장하거나 여기에 지정 (소스에 직접 넣는 것은 권장하지 않음)
+    gemini: {
+      apiKey: null,
+      model: "gemini-3.8-flash",
+      // 모델을 못 찾거나(404) 무료 할당량 초과(429) 시 순서대로 시도 (할당량은 모델별로 따로 계산됨)
+      fallbackModels: ["gemini-3.5-flash-lite", "gemini-2.5-flash"],
+      endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      reasoningEffort: "low",   // 생각(thinking) 정도. 2.5: none~high, 3.x: minimal~high (낮을수록 빠름)
+      maxTokens: 4096,          // Gemini 는 thinking 토큰까지 포함되므로 WebLLM 보다 크게
+      timeoutMs: 45000,
+      fallbackToWebLLM: true    // provider:"auto" 에서 Gemini 실패(네트워크/할당량) 시 WebLLM 으로 이어서 분석
+    },
 
     // 에러 수집/분석
     captureConsole: true,        // console.error / console.warn 도 수집
@@ -66,8 +87,15 @@
 
   var userConfig = global.AI_ASSISTANT_CONFIG || {};
   for (var cfgKey in userConfig) {
-    if (Object.prototype.hasOwnProperty.call(userConfig, cfgKey)) {
-      CONFIG[cfgKey] = userConfig[cfgKey];
+    if (!Object.prototype.hasOwnProperty.call(userConfig, cfgKey)) continue;
+    var cfgVal = userConfig[cfgKey];
+    // gemini: { apiKey } 처럼 일부만 지정해도 나머지 기본값 유지
+    if (cfgVal && typeof cfgVal === "object" && !Array.isArray(cfgVal) && CONFIG[cfgKey] && typeof CONFIG[cfgKey] === "object" && !Array.isArray(CONFIG[cfgKey])) {
+      for (var subKey in cfgVal) {
+        if (Object.prototype.hasOwnProperty.call(cfgVal, subKey)) CONFIG[cfgKey][subKey] = cfgVal[subKey];
+      }
+    } else {
+      CONFIG[cfgKey] = cfgVal;
     }
   }
 
@@ -330,6 +358,14 @@
       this.init(function (err) { if (!err) action(); });
     },
 
+    // Promise 버전 (초기화 실패 시 reject)
+    readyPromise: function () {
+      var self = this;
+      return new Promise(function (resolve, reject) {
+        self.init(function (err) { if (err) reject(err); else resolve(); });
+      });
+    },
+
     onReady: function (title) {
       this.ready = true;
       this.loading = false;
@@ -480,7 +516,13 @@
         };
         var extras = Models.requestExtras(self.modelId);
         for (var k in extras) request[k] = extras[k];
-        return self.engine.chat.completions.create(request);
+        var engine = self.engine;
+        // 응답이 영원히 오지 않으면(GPU device lost 등) 대기열 전체가 막히므로 시간 제한
+        return withTimeout(engine.chat.completions.create(request), CONFIG.requestTimeoutMs).catch(function (err) {
+          if (errMsg(err) !== "timeout") throw err;
+          try { if (engine.interruptGenerate) engine.interruptGenerate(); } catch (e) {}
+          throw new Error("응답 시간 초과 (" + Math.round(CONFIG.requestTimeoutMs / 1000) + "초). GPU 상태를 확인하거나 더 작은 모델을 사용하세요.");
+        });
       }).then(function (res) {
         return cleanModelOutput(res.choices[0].message.content);
       });
@@ -509,7 +551,8 @@
         self.onReady("모델 교체 완료");
       }, function (err) {
         self.loading = false;
-        Log.error("❌ 모델 교체 실패: " + errMsg(err) + " → AISupport.init() 으로 기본 모델 재시도 가능");
+        self.flush(err); // 교체 중 들어온 대기 작업이 영원히 기다리지 않도록
+        Log.error("❌ 모델 교체 실패: " + errMsg(err) + " → AISupport.resetModel() 후 AISupport.init() 으로 기본 모델 재시도 가능");
       });
     },
 
@@ -524,6 +567,172 @@
         Log.info("🗑️ 캐시 삭제 완료: " + modelId);
       }, function (err) {
         Log.error("캐시 삭제 실패: " + errMsg(err));
+      });
+    }
+  };
+
+  // ============================================================
+  // 4-1. Gemini API 제공자 + 제공자 디스패처
+  // ============================================================
+  // OpenAI 호환 엔드포인트를 사용하므로 WebLLM 과 같은 messages 형식을 그대로 보낸다.
+  var Gemini = {
+    lastModel: null,
+    noticeShown: false,
+    tail: Promise.resolve(), // 무료 티어 분당 요청 제한(RPM) 보호를 위해 하나씩 순서대로
+
+    key: function () {
+      return Store.get("geminiKey") || CONFIG.gemini.apiKey || null;
+    },
+    model: function () {
+      return Store.get("geminiModel") || CONFIG.gemini.model;
+    },
+    maskedKey: function () {
+      var k = this.key();
+      return k ? k.substring(0, 4) + "…" + k.substring(k.length - 4) : null;
+    },
+    candidates: function () {
+      var ids = [this.model()];
+      var fallbacks = CONFIG.gemini.fallbackModels || [];
+      for (var i = 0; i < fallbacks.length; i++) {
+        if (ids.indexOf(fallbacks[i]) === -1) ids.push(fallbacks[i]);
+      }
+      return ids;
+    },
+
+    describeError: function (status, json, text) {
+      var errObj = Array.isArray(json) ? json[0] : json; // OpenAI 호환 엔드포인트는 오류를 [{error:{...}}] 배열로 감싸서 반환
+      var apiMsg = (errObj && errObj.error && errObj.error.message) || truncate(text.replace(/\s+/g, " "), 200);
+      if (status === 400 && /api key/i.test(apiMsg)) return "API 키가 올바르지 않습니다 → AISupport.setGeminiKey('새 키') (" + apiMsg + ")";
+      if (status === 401 || status === 403) return "인증/권한 오류 (" + status + "): " + apiMsg;
+      if (status === 404) return "모델을 찾을 수 없음 (404): " + apiMsg;
+      if (status === 429) return "무료 할당량 초과 (429, 분당/일일 제한): " + apiMsg;
+      if (status >= 500) return "Gemini 서버 오류 (" + status + "): " + apiMsg;
+      return "HTTP " + status + ": " + apiMsg;
+    },
+
+    request: function (modelId, messages, settings) {
+      var g = CONFIG.gemini;
+      var body = {
+        model: modelId,
+        messages: messages,
+        temperature: settings.temperature,
+        top_p: settings.top_p,
+        max_tokens: Math.max(settings.max_tokens || 0, g.maxTokens || 0)
+      };
+      if (g.reasoningEffort) body.reasoning_effort = g.reasoningEffort;
+
+      var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+      var timer = controller ? setTimeout(function () { controller.abort(); }, g.timeoutMs) : null;
+      var options = {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + this.key() },
+        body: JSON.stringify(body)
+      };
+      if (controller) options.signal = controller.signal;
+
+      return fetch(g.endpoint, options).then(function (res) {
+        return res.text().then(function (text) {
+          var json = null;
+          try { json = JSON.parse(text); } catch (e) {}
+          if (!res.ok) {
+            var httpErr = new Error(Gemini.describeError(res.status, json, text));
+            httpErr.status = res.status;
+            throw httpErr;
+          }
+          var choice = json && json.choices && json.choices[0];
+          var content = choice && choice.message && choice.message.content;
+          if (Array.isArray(content)) { // 일부 응답은 parts 배열
+            content = content.map(function (p) { return typeof p === "string" ? p : (p && p.text) || ""; }).join("");
+          }
+          if (!content) throw new Error("빈 응답 (finish_reason: " + (choice && choice.finish_reason) + ") → gemini.maxTokens 를 늘리거나 reasoningEffort 를 낮추세요");
+          return cleanModelOutput(content);
+        });
+      }, function (err) {
+        if (err && err.name === "AbortError") throw new Error("응답 시간 초과 (" + Math.round(g.timeoutMs / 1000) + "초)");
+        throw new Error("네트워크 오류 (인터넷/방화벽 확인): " + errMsg(err));
+      }).then(function (result) {
+        if (timer) clearTimeout(timer);
+        return result;
+      }, function (err) {
+        if (timer) clearTimeout(timer);
+        throw err;
+      });
+    },
+
+    // 모델 후보를 순서대로 시도 (404/429/5xx 만 다음 모델로, 키 오류·네트워크 오류는 즉시 실패)
+    tryModels: function (ids, messages, settings, lastErr) {
+      var self = this;
+      if (!ids.length) return Promise.reject(lastErr || new Error("사용할 Gemini 모델이 없습니다."));
+      return this.request(ids[0], messages, settings).then(function (text) {
+        self.lastModel = ids[0];
+        return text;
+      }, function (err) {
+        var retryable = err.status === 404 || err.status === 429 || err.status >= 500;
+        if (ids.length > 1 && retryable) {
+          Log.warn("⚠️ Gemini " + ids[0] + " 실패 (" + errMsg(err) + ") → " + ids[1] + " 로 재시도");
+          return self.tryModels(ids.slice(1), messages, settings, err);
+        }
+        throw err;
+      });
+    },
+
+    complete: function (messages, settings) {
+      var self = this;
+      if (!this.key()) {
+        return Promise.reject(new Error("Gemini API 키가 없습니다. AISupport.setGeminiKey('키') 로 설정하세요. (발급: https://aistudio.google.com/apikey)"));
+      }
+      if (!this.noticeShown) {
+        this.noticeShown = true;
+        Log.info("☁️ Gemini API 사용 (" + this.model() + "). 에러 메시지·소스 코드 조각이 Google 로 전송됩니다. 무료 티어는 입력 내용이 제품 개선에 사용될 수 있습니다.");
+      }
+      var task = this.tail.then(function () {
+        return self.tryModels(self.candidates(), messages, settings, null);
+      });
+      this.tail = task.catch(function () {});
+      return task;
+    }
+  };
+
+  // 어떤 제공자로 요청을 보낼지 결정하고, auto 모드에서는 Gemini 실패 시 WebLLM 으로 이어서 처리
+  var AI = {
+    lastModel: null, // 마지막 응답을 만든 모델 (결과 출력의 소요 시간 옆에 표시)
+
+    provider: function () {
+      if (CONFIG.provider === "webllm") return "webllm";
+      if (CONFIG.provider === "gemini") return "gemini";
+      return Gemini.key() ? "gemini" : "webllm";
+    },
+
+    ready: function () {
+      return this.provider() === "gemini" ? true : AIEngine.ready;
+    },
+
+    whenReady: function (action) {
+      if (this.provider() === "gemini") action();
+      else AIEngine.whenReady(action);
+    },
+
+    complete: function (messages, settings) {
+      var self = this;
+      if (this.provider() !== "gemini") return this.viaWebLLM(messages, settings);
+
+      return Gemini.complete(messages, settings).then(function (text) {
+        self.lastModel = Gemini.lastModel;
+        return text;
+      }, function (err) {
+        if (CONFIG.provider === "gemini" || !CONFIG.gemini.fallbackToWebLLM) throw err;
+        Log.warn("⚠️ Gemini 실패 (" + errMsg(err) + ") → 브라우저 내 WebLLM 으로 이어서 처리합니다");
+        return AIEngine.readyPromise().then(function () {
+          return self.viaWebLLM(messages, settings);
+        });
+      });
+    },
+
+    viaWebLLM: function (messages, settings) {
+      var self = this;
+      return AIEngine.complete(messages, settings).then(function (text) {
+        self.lastModel = AIEngine.modelId;
+        return text;
       });
     }
   };
@@ -681,9 +890,12 @@
       var name = null, message, stack = null;
 
       if (error && typeof error === "object" && (error.message || error.stack)) {
-        name = error.name || null;
+        name = error.name || error.type || null; // AISupport.analyze({message, type:'DatabaseError'})
         message = String(error.message || "");
         stack = error.stack || null;
+        if (error.code && !(error instanceof Error)) message = "[" + error.code + "] " + message;
+        if (typeof error.details === "string") message += " - " + error.details;
+        if (typeof error.context === "string" && !meta.context) meta.context = error.context;
       } else {
         message = String(error);
         if (/\n\s+at\s|@\S+:\d+:\d+/.test(message)) stack = message; // 스택이 포함된 로그 문자열
@@ -699,15 +911,19 @@
         }
       }
 
+      var frames = SourceInspector.userFrames(stack);
+      // 같은 에러 판별 기준: 메시지 + 사용자 코드 위치 (같은 메시지라도 다른 줄에서 나면 별도 분석)
+      var key = truncate(message, 150) + (frames.length ? " @" + SourceInspector.shortName(frames[0].url) + ":" + frames[0].line : "");
+
       ErrorAnalyzer.handle({
-        key: truncate(message, 150), // 같은 에러 판별 기준
+        key: key,
         name: name || "Error",
         message: message,
         stack: stack,
         source: meta.source || "manual",
         context: meta.context || null,
         exbuilder: this.parseExBuilder(message),
-        frames: SourceInspector.userFrames(stack),
+        frames: frames,
         logs: RecentLogs.snapshot()
       });
     }
@@ -754,7 +970,7 @@
       this.records.set(info.key, { status: "queued", result: null, count: 1, lastSeen: now, lastPrinted: now });
       this.queue.push(info);
 
-      if (AIEngine.ready) {
+      if (AI.ready()) {
         this.drain();
       } else if (!AIEngine.initialized || AIEngine.loading) {
         Log.info("엔진 준비 중 → 준비되면 분석합니다. (대기 " + this.queue.length + "건)");
@@ -767,15 +983,15 @@
     // 대기열을 하나씩 순서대로 분석
     drain: function () {
       var self = this;
-      if (this.analyzing || !AIEngine.ready || !this.queue.length) return;
+      if (this.analyzing || !AI.ready() || !this.queue.length) return;
 
       var info = this.queue.shift();
       var started = Date.now();
       this.analyzing = true;
-      Log.styled(TAG + " 🔍 AI 분석 중: " + truncate(info.message, 80), STYLE.title);
+      Log.styled(TAG + " 🔍 AI 분석 중 (" + AI.provider() + "): " + truncate(info.message, 80), STYLE.title);
 
       SourceInspector.collect(info.frames).then(function (snippets) {
-        return AIEngine.complete([
+        return AI.complete([
           { role: "system", content: self.systemPrompt },
           { role: "user", content: self.buildPrompt(info, snippets) }
         ], CONFIG.errorAnalysisSettings);
@@ -850,7 +1066,7 @@
     printResult: function (info, content, startedAt) {
       Log.block("🤖 AI 에러 분석 결과 - " + info.name, STYLE.result, function () {
         Log.plain(content);
-        if (startedAt) Log.elapsed(startedAt, AIEngine.modelId);
+        if (startedAt) Log.elapsed(startedAt, AI.lastModel);
       });
     },
 
@@ -880,12 +1096,12 @@
       Log.styled("[User] " + userMessage, STYLE.title);
       Log.styled("[AI] 생각하는 중...", "color:#9E9E9E; font-style:italic");
 
-      return AIEngine.complete(
+      return AI.complete(
         [{ role: "system", content: this.systemPrompt }].concat(this.conversationHistory),
         CONFIG.chatSettings
       ).then(function (answer) {
         Log.styled("[AI] " + answer, STYLE.success);
-        Log.elapsed(started);
+        Log.elapsed(started, AI.lastModel);
         self.conversationHistory.push({ role: "assistant", content: answer });
         return answer;
       }, function (err) {
@@ -1001,18 +1217,22 @@
     // 이전 버전 호환
     getSystemPrompt: function () { return this.systemPrompt; },
 
+    // data.json(선택 사항)은 첫 search() 호출 때 한 번만 시도 (페이지 로드 시 불필요한 요청/404 로그 방지)
+    loadPromise: null,
     loadFromFile: function () {
       var self = this;
+      if (this.loadPromise) return this.loadPromise;
       var dataPath = resolveURL(CONFIG.webllmDir + CONFIG.dataFile);
-      fetch(dataPath).then(function (res) {
-        if (res.status === 404) return null; // data.json 은 선택 사항
+      this.loadPromise = fetch(dataPath).then(function (res) {
+        if (res.status === 404) return null;
         if (!res.ok) throw new Error("HTTP " + res.status);
         return res.json();
       }).then(function (json) {
-        if (json && self.loadData(json)) Log.info("[API Search] ✅ data.json 자동 로드 완료 → search('검색어')");
+        if (json && self.loadData(json)) Log.info("[API Search] ✅ data.json 자동 로드 완료");
       }).catch(function (err) {
         Log.warn("[API Search] data.json 로드 실패 (" + errMsg(err) + "): " + dataPath);
       });
+      return this.loadPromise;
     }
   };
 
@@ -1021,39 +1241,42 @@
 
     search: function (query) {
       var self = this;
-      if (!APIDatabase.loaded) {
-        Log.error("[API Search] ❌ API 데이터가 로드되지 않았습니다. loadAPI([...]) 또는 " + resolveURL(CONFIG.webllmDir + CONFIG.dataFile) + " 배치");
-        return;
-      }
       if (this.searching) {
         Log.info("[API Search] ⏳ 이전 검색이 진행 중입니다...");
         return;
       }
-      var relevant = APIDatabase.searchRelevantData(query);
-      if (!relevant.length) {
-        Log.info("[API Search] ℹ️ 관련 API 를 찾지 못했습니다.");
-        return;
-      }
+      var ensureData = APIDatabase.loaded ? Promise.resolve() : APIDatabase.loadFromFile();
+      ensureData.then(function () {
+        if (!APIDatabase.loaded) {
+          Log.error("[API Search] ❌ API 데이터가 로드되지 않았습니다. loadAPI([...]) 또는 " + resolveURL(CONFIG.webllmDir + CONFIG.dataFile) + " 배치");
+          return;
+        }
+        var relevant = APIDatabase.searchRelevantData(query);
+        if (!relevant.length) {
+          Log.info("[API Search] ℹ️ 관련 API 를 찾지 못했습니다.");
+          return;
+        }
 
-      AIEngine.whenReady(function () {
-        var started = Date.now();
-        self.searching = true;
-        Log.styled("[API Search] 🔍 " + query + "  (후보: " + relevant.slice(0, 3).map(function (r) {
-          return r.CTRL_RCD + "." + r.PRO_NM_RCD;
-        }).join(", ") + ")", "color:#9C27B0; font-weight:bold");
+        AI.whenReady(function () {
+          var started = Date.now();
+          self.searching = true;
+          Log.styled("[API Search] 🔍 " + query + "  (후보: " + relevant.slice(0, 3).map(function (r) {
+            return r.CTRL_RCD + "." + r.PRO_NM_RCD;
+          }).join(", ") + ")", "color:#9C27B0; font-weight:bold");
 
-        AIEngine.complete([
-          { role: "system", content: APIDatabase.systemPrompt },
-          { role: "user", content: "질문: " + query + "\n\n=== 관련 API 정보 ===\n" + APIDatabase.buildDetailedContext(relevant) }
-        ], CONFIG.apiSearchSettings).then(function (answer) {
-          Log.block("🤖 AI API 검색 결과", STYLE.search, function () {
-            Log.plain(answer);
-            Log.elapsed(started);
+          AI.complete([
+            { role: "system", content: APIDatabase.systemPrompt },
+            { role: "user", content: "질문: " + query + "\n\n=== 관련 API 정보 ===\n" + APIDatabase.buildDetailedContext(relevant) }
+          ], CONFIG.apiSearchSettings).then(function (answer) {
+            Log.block("🤖 AI API 검색 결과", STYLE.search, function () {
+              Log.plain(answer);
+              Log.elapsed(started, AI.lastModel);
+            });
+          }, function (err) {
+            Log.error("[API Search] ❌ AI 분석 오류: " + errMsg(err));
+          }).then(function () {
+            self.searching = false;
           });
-        }, function (err) {
-          Log.error("[API Search] ❌ AI 분석 오류: " + errMsg(err));
-        }).then(function () {
-          self.searching = false;
         });
       });
     }
@@ -1184,18 +1407,63 @@
       return AIEngine.deleteModelCache(key || Models.currentKey());
     },
 
+    /**
+     * Gemini API 키 설정 (브라우저 localStorage 에 저장, 다음 방문에도 유지). null 이면 삭제 → WebLLM 으로 복귀
+     * 발급: https://aistudio.google.com/apikey  예: AISupport.setGeminiKey('AIza...')
+     */
+    setGeminiKey: function (key) {
+      if (key == null || key === "") {
+        Store.set("geminiKey", null);
+        Log.info("Gemini 키 삭제 → 이후 요청은 " + AI.provider() + " 사용");
+        return;
+      }
+      if (typeof key !== "string" || key.trim().length < 20) {
+        Log.error("올바른 API 키 문자열을 입력하세요. 예: AISupport.setGeminiKey('AIza...')");
+        return;
+      }
+      Store.set("geminiKey", key.trim());
+      Gemini.noticeShown = false;
+      Log.styled(TAG + " ☁️ Gemini 키 저장 (" + Gemini.maskedKey() + ") → 이후 분석/채팅은 " + Gemini.model() + " 사용" +
+                 (AI.provider() !== "gemini" ? " (현재 provider:'" + CONFIG.provider + "' 설정으로 WebLLM 유지)" : ""), STYLE.success);
+      Log.plain("  · 이 브라우저에만 저장됩니다. 키는 Google Cloud 콘솔에서 'Gemini API 전용 + HTTP 리퍼러 제한'을 권장합니다.");
+      Log.plain("  · 무료 티어는 전송 내용(에러 메시지·소스 조각)이 Google 제품 개선에 사용될 수 있습니다.");
+    },
+
+    /** Gemini 모델 변경 (브라우저에 저장). 예: AISupport.setGeminiModel('gemini-2.5-flash'), null 이면 기본값 */
+    setGeminiModel: function (modelId) {
+      Store.set("geminiModel", modelId || null);
+      Log.info("Gemini 모델: " + Gemini.model());
+    },
+
+    /** 제공자 강제 지정: 'auto' | 'gemini' | 'webllm' (현재 세션에만 적용) */
+    setProvider: function (name) {
+      if (["auto", "gemini", "webllm"].indexOf(name) === -1) {
+        Log.error("provider 는 'auto' | 'gemini' | 'webllm' 중 하나여야 합니다.");
+        return;
+      }
+      CONFIG.provider = name;
+      Log.info("provider = " + name + " → 실제 사용: " + AI.provider());
+    },
+
     /** 현재 상태 */
     status: function () {
       var s = {
-        ready: AIEngine.ready,
-        loading: AIEngine.loading,
-        model: AIEngine.modelId || Models.toModelId(Models.currentKey()),
-        mode: AIEngine.mode,
-        shaderF16: Models.supportsF16,
+        provider: AI.provider(),
+        providerSetting: CONFIG.provider,
+        ready: AI.ready(),
+        lastModel: AI.lastModel,
+        gemini: { key: Gemini.maskedKey(), model: Gemini.model(), fallbacks: CONFIG.gemini.fallbackModels },
+        webllm: {
+          ready: AIEngine.ready,
+          loading: AIEngine.loading,
+          model: AIEngine.modelId || Models.toModelId(Models.currentKey()),
+          mode: AIEngine.mode,
+          shaderF16: Models.supportsF16,
+          lib: AIEngine.libURL
+        },
         eXBuilderHook: Hooks.platformInstalled,
         queue: ErrorAnalyzer.queue.length,
-        knownErrors: ErrorAnalyzer.records.size(),
-        webllm: AIEngine.libURL
+        knownErrors: ErrorAnalyzer.records.size()
       };
       Log.info("상태", s);
       return s;
@@ -1228,7 +1496,7 @@
       Log.error("❌ 메시지를 입력해주세요. 예: chat('안녕하세요')");
       return;
     }
-    AIEngine.whenReady(function () {
+    AI.whenReady(function () {
       ChatManager.sendMessage(message).catch(function () {});
     });
   };
@@ -1243,7 +1511,10 @@
     Log.plain("  AISupport.analyze(err)          - 직접 분석 요청");
     Log.plain("✓ AI 채팅          : chat('메시지') / clearChat()");
     Log.plain("✓ API 검색         : loadAPI([...]) / search('콤보박스 아이템 추가방법')");
-    Log.plain("✓ 모델/상태");
+    Log.plain("✓ Gemini API (선택) : 키를 넣으면 모델 다운로드 없이 즉시·고품질 분석 (현재: " + AI.provider() + ")");
+    Log.plain("  AISupport.setGeminiKey('AIza...') - 무료 키 저장 (https://aistudio.google.com/apikey), null 이면 삭제");
+    Log.plain("  AISupport.setGeminiModel('id')    - Gemini 모델 변경 / AISupport.setProvider('auto'|'gemini'|'webllm')");
+    Log.plain("✓ WebLLM 모델/상태");
     Log.plain("  AISupport.models()              - 모델 목록");
     Log.plain("  AISupport.setModel('qwen3-1.7b') - 모델 변경 (저장됨)");
     Log.plain("  AISupport.deleteModelCache('키') - 저장된 모델 파일 삭제");
@@ -1252,6 +1523,8 @@
 
   // 이전 버전 호환 (고급 사용자용)
   global.AIEngine = AIEngine;
+  global.AIProvider = AI;
+  global.Gemini = Gemini;
   global.ErrorAnalyzer = ErrorAnalyzer;
   global.ChatManager = ChatManager;
   global.APIDatabase = APIDatabase;
@@ -1270,11 +1543,11 @@
     }, 250);
   }
 
-  Log.styled(TAG + " 📚 로드 완료 - chatHelp() 로 사용법 확인", STYLE.title);
-  APIDatabase.loadFromFile();
+  Log.styled(TAG + " 📚 로드 완료 - chatHelp() 로 사용법 확인 (provider: " + AI.provider() +
+             (AI.provider() === "gemini" ? ", " + Gemini.model() : "") + ")", STYLE.title);
 
-  // 앱 화면 초기화와 경쟁하지 않도록 브라우저가 한가할 때 모델 로드 시작
-  if (CONFIG.preload) {
+  // 앱 화면 초기화와 경쟁하지 않도록 브라우저가 한가할 때 모델 로드 시작 (Gemini 사용 시에는 폴백 때만 로드)
+  if (CONFIG.preload && AI.provider() === "webllm") {
     var startPreload = function () {
       if (AIEngine.initialized) return;
       if (global.requestIdleCallback) global.requestIdleCallback(function () { AIEngine.init(); }, { timeout: 3000 });
